@@ -1,5 +1,5 @@
 repository:
-    path: github.com/prometheus/prometheus
+    path: github.com/jkohen/prometheus
 build:
     binaries:
         - name: prometheus
