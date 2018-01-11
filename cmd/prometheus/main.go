@@ -29,29 +29,26 @@ import (
 	"syscall"
 	"time"
 
+	kingpin "gopkg.in/alecthomas/kingpin.v2"
+
 	"github.com/go-kit/kit/log"
 	"github.com/go-kit/kit/log/level"
+	conntrack "github.com/mwitkow/go-conntrack"
 	"github.com/oklog/oklog/pkg/group"
 	"github.com/pkg/errors"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/common/model"
 	"github.com/prometheus/common/version"
-	"gopkg.in/alecthomas/kingpin.v2"
 	k8s_runtime "k8s.io/apimachinery/pkg/util/runtime"
 
-	"github.com/mwitkow/go-conntrack"
 	"github.com/prometheus/common/promlog"
 	promlogflag "github.com/prometheus/common/promlog/flag"
 	"github.com/prometheus/prometheus/config"
 	"github.com/prometheus/prometheus/discovery"
-	"github.com/prometheus/prometheus/notifier"
-	"github.com/prometheus/prometheus/promql"
 	"github.com/prometheus/prometheus/retrieval"
-	"github.com/prometheus/prometheus/rules"
 	"github.com/prometheus/prometheus/storage"
 	"github.com/prometheus/prometheus/storage/remote"
 	"github.com/prometheus/prometheus/storage/tsdb"
-	"github.com/prometheus/prometheus/util/strutil"
 	"github.com/prometheus/prometheus/web"
 )
 
@@ -82,26 +79,14 @@ func main() {
 		configFile string
 
 		localStoragePath string
-		notifier         notifier.Options
-		notifierTimeout  model.Duration
-		queryEngine      promql.EngineOptions
 		web              web.Options
 		tsdb             tsdb.Options
-		lookbackDelta    model.Duration
 		webTimeout       model.Duration
-		queryTimeout     model.Duration
 
 		prometheusURL string
 
 		logLevel promlog.AllowedLevel
-	}{
-		notifier: notifier.Options{
-			Registerer: prometheus.DefaultRegisterer,
-		},
-		queryEngine: promql.EngineOptions{
-			Metrics: prometheus.DefaultRegisterer,
-		},
-	}
+	}{}
 
 	a := kingpin.New(filepath.Base(os.Args[0]), "The Prometheus monitoring server")
 
@@ -161,21 +146,6 @@ func main() {
 	a.Flag("storage.tsdb.no-lockfile", "Do not create lockfile in data directory.").
 		Default("false").BoolVar(&cfg.tsdb.NoLockfile)
 
-	a.Flag("alertmanager.notification-queue-capacity", "The capacity of the queue for pending alert manager notifications.").
-		Default("10000").IntVar(&cfg.notifier.QueueCapacity)
-
-	a.Flag("alertmanager.timeout", "Timeout for sending alerts to Alertmanager.").
-		Default("10s").SetValue(&cfg.notifierTimeout)
-
-	a.Flag("query.lookback-delta", "The delta difference allowed for retrieving metrics during expression evaluations.").
-		Default("5m").SetValue(&cfg.lookbackDelta)
-
-	a.Flag("query.timeout", "Maximum time a query may take before being aborted.").
-		Default("2m").SetValue(&cfg.queryTimeout)
-
-	a.Flag("query.max-concurrency", "Maximum number of queries executed concurrently.").
-		Default("20").IntVar(&cfg.queryEngine.MaxConcurrentQueries)
-
 	promlogflag.AddFlags(a, &cfg.logLevel)
 
 	_, err := a.Parse(os.Args[1:])
@@ -203,10 +173,6 @@ func main() {
 		cfg.tsdb.MaxBlockDuration = cfg.tsdb.Retention / 10
 	}
 
-	promql.LookbackDelta = time.Duration(cfg.lookbackDelta)
-
-	cfg.queryEngine.Timeout = time.Duration(cfg.queryTimeout)
-
 	logger := promlog.New(cfg.logLevel)
 
 	// XXX(fabxc): Kubernetes does background logging which we can only customize by modifying
@@ -229,33 +195,17 @@ func main() {
 		fanoutStorage = storage.NewFanout(logger, localStorage, remoteStorage)
 	)
 
-	cfg.queryEngine.Logger = log.With(logger, "component", "query engine")
 	var (
 		ctxWeb, cancelWeb = context.WithCancel(context.Background())
-		ctxRule           = context.Background()
 
-		notifier         = notifier.New(&cfg.notifier, log.With(logger, "component", "notifier"))
 		discoveryManager = discovery.NewManager(log.With(logger, "component", "discovery manager"))
 		scrapeManager    = retrieval.NewScrapeManager(log.With(logger, "component", "scrape manager"), fanoutStorage)
-		queryEngine      = promql.NewEngine(fanoutStorage, &cfg.queryEngine)
-		ruleManager      = rules.NewManager(&rules.ManagerOptions{
-			Appendable:  fanoutStorage,
-			QueryFunc:   rules.EngineQueryFunc(queryEngine),
-			NotifyFunc:  sendAlerts(notifier, cfg.web.ExternalURL.String()),
-			Context:     ctxRule,
-			ExternalURL: cfg.web.ExternalURL,
-			Registerer:  prometheus.DefaultRegisterer,
-			Logger:      log.With(logger, "component", "rule manager"),
-		})
 	)
 
 	cfg.web.Context = ctxWeb
 	cfg.web.TSDB = localStorage.Get
 	cfg.web.Storage = fanoutStorage
-	cfg.web.QueryEngine = queryEngine
 	cfg.web.ScrapeManager = scrapeManager
-	cfg.web.RuleManager = ruleManager
-	cfg.web.Notifier = notifier
 
 	cfg.web.Version = &web.PrometheusVersion{
 		Version:   version.Version,
@@ -282,22 +232,8 @@ func main() {
 	reloaders := []func(cfg *config.Config) error{
 		remoteStorage.ApplyConfig,
 		webHandler.ApplyConfig,
-		notifier.ApplyConfig,
 		discoveryManager.ApplyConfig,
 		scrapeManager.ApplyConfig,
-		func(cfg *config.Config) error {
-			// Get all rule files matching the configuration oaths.
-			var files []string
-			for _, pat := range cfg.RuleFiles {
-				fs, err := filepath.Glob(pat)
-				if err != nil {
-					// The only error can be a bad pattern.
-					return fmt.Errorf("error retrieving rule files for %s: %s", pat, err)
-				}
-				files = append(files, fs...)
-			}
-			return ruleManager.Update(time.Duration(cfg.GlobalConfig.EvaluationInterval), files)
-		},
 	}
 
 	prometheus.MustRegister(configSuccess)
@@ -466,38 +402,7 @@ func main() {
 				return nil
 			},
 			func(err error) {
-				// Keep this interrupt before the ruleManager.Stop().
-				// Shutting down the query engine before the rule manager will cause pending queries
-				// to be canceled and ensures a quick shutdown of the rule manager.
 				cancelWeb()
-			},
-		)
-	}
-	{
-		// TODO(krasi) refactor ruleManager.Run() to be blocking to avoid using an extra blocking channel.
-		cancel := make(chan struct{})
-		g.Add(
-			func() error {
-				ruleManager.Run()
-				<-cancel
-				return nil
-			},
-			func(err error) {
-				ruleManager.Stop()
-				close(cancel)
-			},
-		)
-	}
-	{
-		// Calling notifier.Stop() before ruleManager.Stop() will cause a panic if the ruleManager isn't running,
-		// so keep this interrupt after the ruleManager.Stop().
-		g.Add(
-			func() error {
-				notifier.Run()
-				return nil
-			},
-			func(err error) {
-				notifier.Stop()
 			},
 		)
 	}
@@ -573,34 +478,4 @@ func computeExternalURL(u, listenAddr string) (*url.URL, error) {
 	eu.Path = ppref
 
 	return eu, nil
-}
-
-// sendAlerts implements a the rules.NotifyFunc for a Notifier.
-// It filters any non-firing alerts from the input.
-func sendAlerts(n *notifier.Notifier, externalURL string) rules.NotifyFunc {
-	return func(ctx context.Context, expr string, alerts ...*rules.Alert) error {
-		var res []*notifier.Alert
-
-		for _, alert := range alerts {
-			// Only send actually firing alerts.
-			if alert.State == rules.StatePending {
-				continue
-			}
-			a := &notifier.Alert{
-				StartsAt:     alert.FiredAt,
-				Labels:       alert.Labels,
-				Annotations:  alert.Annotations,
-				GeneratorURL: externalURL + strutil.TableLinkForExpression(expr),
-			}
-			if !alert.ResolvedAt.IsZero() {
-				a.EndsAt = alert.ResolvedAt
-			}
-			res = append(res, a)
-		}
-
-		if len(alerts) > 0 {
-			n.Send(res...)
-		}
-		return nil
-	}
 }
