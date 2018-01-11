@@ -800,6 +800,282 @@
 			"revisionTime": "2016-04-11T19:08:41Z"
 		},
 		{
+			"checksumSHA1": "loeVMgB8u6xSuYOXqkAgBoH5PPc=",
+			"path": "github.com/prometheus/prometheus/config",
+			"revision": "0471e64ad11ad8fadf063960bbe93bc715539afe",
+			"revisionTime": "2018-01-11T15:10:25Z"
+		},
+		{
+			"checksumSHA1": "PsSSnmzaL2hKPqs3jehi4rNL9ws=",
+			"path": "github.com/prometheus/prometheus/discovery",
+			"revision": "0471e64ad11ad8fadf063960bbe93bc715539afe",
+			"revisionTime": "2018-01-11T15:10:25Z"
+		},
+		{
+			"checksumSHA1": "46uh0EwVaRYTYrv3Fpibur7pCkc=",
+			"path": "github.com/prometheus/prometheus/discovery/azure",
+			"revision": "0471e64ad11ad8fadf063960bbe93bc715539afe",
+			"revisionTime": "2018-01-11T15:10:25Z"
+		},
+		{
+			"checksumSHA1": "BJeJ/bdcqvVLDP+skR7qmHUAs40=",
+			"path": "github.com/prometheus/prometheus/discovery/config",
+			"revision": "0471e64ad11ad8fadf063960bbe93bc715539afe",
+			"revisionTime": "2018-01-11T15:10:25Z"
+		},
+		{
+			"checksumSHA1": "g7ZLAjVw8ZYnhlsRmAQPkXG6DnA=",
+			"path": "github.com/prometheus/prometheus/discovery/consul",
+			"revision": "0471e64ad11ad8fadf063960bbe93bc715539afe",
+			"revisionTime": "2018-01-11T15:10:25Z"
+		},
+		{
+			"checksumSHA1": "aiGrYOQQlB76hSkfMmb17FI6O+8=",
+			"path": "github.com/prometheus/prometheus/discovery/dns",
+			"revision": "0471e64ad11ad8fadf063960bbe93bc715539afe",
+			"revisionTime": "2018-01-11T15:10:25Z"
+		},
+		{
+			"checksumSHA1": "0r/sNckkbjzyUqLdVDMrhBllAJc=",
+			"path": "github.com/prometheus/prometheus/discovery/ec2",
+			"revision": "0471e64ad11ad8fadf063960bbe93bc715539afe",
+			"revisionTime": "2018-01-11T15:10:25Z"
+		},
+		{
+			"checksumSHA1": "VMXY32ebiBjgJ9UT/iy5bvFkhWY=",
+			"path": "github.com/prometheus/prometheus/discovery/file",
+			"revision": "0471e64ad11ad8fadf063960bbe93bc715539afe",
+			"revisionTime": "2018-01-11T15:10:25Z"
+		},
+		{
+			"checksumSHA1": "sKpDfrIPa6TuwqVBbzIJvIlcmHQ=",
+			"path": "github.com/prometheus/prometheus/discovery/gce",
+			"revision": "0471e64ad11ad8fadf063960bbe93bc715539afe",
+			"revisionTime": "2018-01-11T15:10:25Z"
+		},
+		{
+			"checksumSHA1": "+ZThrcPurowWVroF+YE9TMvWdhA=",
+			"path": "github.com/prometheus/prometheus/discovery/kubernetes",
+			"revision": "0471e64ad11ad8fadf063960bbe93bc715539afe",
+			"revisionTime": "2018-01-11T15:10:25Z"
+		},
+		{
+			"checksumSHA1": "hIzrHlik0l83eUJQne3SD/CAR7w=",
+			"path": "github.com/prometheus/prometheus/discovery/marathon",
+			"revision": "0471e64ad11ad8fadf063960bbe93bc715539afe",
+			"revisionTime": "2018-01-11T15:10:25Z"
+		},
+		{
+			"checksumSHA1": "GYCdUiP/TJJ/k/uX1XeKL6uuzos=",
+			"path": "github.com/prometheus/prometheus/discovery/openstack",
+			"revision": "0471e64ad11ad8fadf063960bbe93bc715539afe",
+			"revisionTime": "2018-01-11T15:10:25Z"
+		},
+		{
+			"checksumSHA1": "vGXv7DcT6ngd1G4OZuBC6n/YBKs=",
+			"path": "github.com/prometheus/prometheus/discovery/targetgroup",
+			"revision": "0471e64ad11ad8fadf063960bbe93bc715539afe",
+			"revisionTime": "2018-01-11T15:10:25Z"
+		},
+		{
+			"checksumSHA1": "YCpFRduyrXxu+C3mAu+VIWCbPs4=",
+			"path": "github.com/prometheus/prometheus/discovery/triton",
+			"revision": "0471e64ad11ad8fadf063960bbe93bc715539afe",
+			"revisionTime": "2018-01-11T15:10:25Z"
+		},
+		{
+			"checksumSHA1": "Ruo8xw00GerjkGX7ZqEBzOvhZK8=",
+			"path": "github.com/prometheus/prometheus/discovery/zookeeper",
+			"revision": "0471e64ad11ad8fadf063960bbe93bc715539afe",
+			"revisionTime": "2018-01-11T15:10:25Z"
+		},
+		{
+			"checksumSHA1": "6METlRC5MGIr/WDuWFcdkCylMDE=",
+			"path": "github.com/prometheus/prometheus/documentation/examples/remote_storage/remote_storage_adapter/graphite",
+			"revision": "0471e64ad11ad8fadf063960bbe93bc715539afe",
+			"revisionTime": "2018-01-11T15:10:25Z"
+		},
+		{
+			"checksumSHA1": "vWbJufPCY8htHwo1pAGxeAkD/Wk=",
+			"path": "github.com/prometheus/prometheus/documentation/examples/remote_storage/remote_storage_adapter/influxdb",
+			"revision": "0471e64ad11ad8fadf063960bbe93bc715539afe",
+			"revisionTime": "2018-01-11T15:10:25Z"
+		},
+		{
+			"checksumSHA1": "DUdtqvdwFmbc2UCnItqWITigMuM=",
+			"path": "github.com/prometheus/prometheus/documentation/examples/remote_storage/remote_storage_adapter/opentsdb",
+			"revision": "0471e64ad11ad8fadf063960bbe93bc715539afe",
+			"revisionTime": "2018-01-11T15:10:25Z"
+		},
+		{
+			"checksumSHA1": "fKyAtp2MkVCJm6mJh+V+sOXQJDE=",
+			"path": "github.com/prometheus/prometheus/notifier",
+			"revision": "0471e64ad11ad8fadf063960bbe93bc715539afe",
+			"revisionTime": "2018-01-11T15:10:25Z"
+		},
+		{
+			"checksumSHA1": "SHQtAZihlODvQb5tAGPh8hbAtJQ=",
+			"path": "github.com/prometheus/prometheus/pkg/labels",
+			"revision": "0471e64ad11ad8fadf063960bbe93bc715539afe",
+			"revisionTime": "2018-01-11T15:10:25Z"
+		},
+		{
+			"checksumSHA1": "DVzTLz4Efu4yX3D/Y9yN+ocAPWc=",
+			"path": "github.com/prometheus/prometheus/pkg/pool",
+			"revision": "0471e64ad11ad8fadf063960bbe93bc715539afe",
+			"revisionTime": "2018-01-11T15:10:25Z"
+		},
+		{
+			"checksumSHA1": "PhZjYX0DJYv1MaWal0DLTWfqeag=",
+			"path": "github.com/prometheus/prometheus/pkg/relabel",
+			"revision": "0471e64ad11ad8fadf063960bbe93bc715539afe",
+			"revisionTime": "2018-01-11T15:10:25Z"
+		},
+		{
+			"checksumSHA1": "14cxfHETVNR6PUCOrGsPVP33v3w=",
+			"path": "github.com/prometheus/prometheus/pkg/rulefmt",
+			"revision": "0471e64ad11ad8fadf063960bbe93bc715539afe",
+			"revisionTime": "2018-01-11T15:10:25Z"
+		},
+		{
+			"checksumSHA1": "kB8ipc+Y/G7C1i2JY+B+vFpLoTo=",
+			"path": "github.com/prometheus/prometheus/pkg/textparse",
+			"revision": "0471e64ad11ad8fadf063960bbe93bc715539afe",
+			"revisionTime": "2018-01-11T15:10:25Z"
+		},
+		{
+			"checksumSHA1": "aBxiHq8WBoLD+8U0/PxdWufs64o=",
+			"path": "github.com/prometheus/prometheus/pkg/timestamp",
+			"revision": "0471e64ad11ad8fadf063960bbe93bc715539afe",
+			"revisionTime": "2018-01-11T15:10:25Z"
+		},
+		{
+			"checksumSHA1": "gzjvMvC2Dp8nBQDlcZhtjIykZdY=",
+			"path": "github.com/prometheus/prometheus/pkg/value",
+			"revision": "0471e64ad11ad8fadf063960bbe93bc715539afe",
+			"revisionTime": "2018-01-11T15:10:25Z"
+		},
+		{
+			"checksumSHA1": "GQnze0qsMjynOFBFX1TauSakwuI=",
+			"path": "github.com/prometheus/prometheus/prompb",
+			"revision": "0471e64ad11ad8fadf063960bbe93bc715539afe",
+			"revisionTime": "2018-01-11T15:10:25Z"
+		},
+		{
+			"checksumSHA1": "HMdaAI/kolGIyuwq6JVYBxJnkkg=",
+			"path": "github.com/prometheus/prometheus/promql",
+			"revision": "0471e64ad11ad8fadf063960bbe93bc715539afe",
+			"revisionTime": "2018-01-11T15:10:25Z"
+		},
+		{
+			"checksumSHA1": "U6SqK3Gxb45aFM5tsC1tiiBe5z0=",
+			"path": "github.com/prometheus/prometheus/relabel",
+			"revision": "0471e64ad11ad8fadf063960bbe93bc715539afe",
+			"revisionTime": "2018-01-11T15:10:25Z"
+		},
+		{
+			"checksumSHA1": "XOan4UkK06KCUXy107GkHeJoMO4=",
+			"path": "github.com/prometheus/prometheus/retrieval",
+			"revision": "0471e64ad11ad8fadf063960bbe93bc715539afe",
+			"revisionTime": "2018-01-11T15:10:25Z"
+		},
+		{
+			"checksumSHA1": "NkCF3ZWmu60TJpT6RHEfSf7N4fo=",
+			"path": "github.com/prometheus/prometheus/rules",
+			"revision": "0471e64ad11ad8fadf063960bbe93bc715539afe",
+			"revisionTime": "2018-01-11T15:10:25Z"
+		},
+		{
+			"checksumSHA1": "iWfe3ysHrpUgmybifH9w9TcXkUk=",
+			"path": "github.com/prometheus/prometheus/storage",
+			"revision": "0471e64ad11ad8fadf063960bbe93bc715539afe",
+			"revisionTime": "2018-01-11T15:10:25Z"
+		},
+		{
+			"checksumSHA1": "6hoVzAopVC89X1hMq113fgQQhXw=",
+			"path": "github.com/prometheus/prometheus/storage/remote",
+			"revision": "0471e64ad11ad8fadf063960bbe93bc715539afe",
+			"revisionTime": "2018-01-11T15:10:25Z"
+		},
+		{
+			"checksumSHA1": "BkTtR346n9PAr30bdZJDzgV+9Nc=",
+			"path": "github.com/prometheus/prometheus/storage/tsdb",
+			"revision": "0471e64ad11ad8fadf063960bbe93bc715539afe",
+			"revisionTime": "2018-01-11T15:10:25Z"
+		},
+		{
+			"checksumSHA1": "5Y2qc3Yb+KfB6uBIicB1N+Ti1i8=",
+			"path": "github.com/prometheus/prometheus/template",
+			"revision": "0471e64ad11ad8fadf063960bbe93bc715539afe",
+			"revisionTime": "2018-01-11T15:10:25Z"
+		},
+		{
+			"checksumSHA1": "DJR4v1hamNgvwX2SmHsxv+7pSY0=",
+			"path": "github.com/prometheus/prometheus/util/httputil",
+			"revision": "0471e64ad11ad8fadf063960bbe93bc715539afe",
+			"revisionTime": "2018-01-11T15:10:25Z"
+		},
+		{
+			"checksumSHA1": "u2+V1dXJkckA+Ak6UhT4m8UrQdI=",
+			"path": "github.com/prometheus/prometheus/util/promlint",
+			"revision": "0471e64ad11ad8fadf063960bbe93bc715539afe",
+			"revisionTime": "2018-01-11T15:10:25Z"
+		},
+		{
+			"checksumSHA1": "TNIu3KUarnQ47VQBndBcUEdFEWg=",
+			"path": "github.com/prometheus/prometheus/util/stats",
+			"revision": "0471e64ad11ad8fadf063960bbe93bc715539afe",
+			"revisionTime": "2018-01-11T15:10:25Z"
+		},
+		{
+			"checksumSHA1": "1Z1LToD/EEb1r+sWog8vtwfaGBk=",
+			"path": "github.com/prometheus/prometheus/util/strutil",
+			"revision": "0471e64ad11ad8fadf063960bbe93bc715539afe",
+			"revisionTime": "2018-01-11T15:10:25Z"
+		},
+		{
+			"checksumSHA1": "YAuwvB2UozynCC1BxJY4KjzbrzE=",
+			"path": "github.com/prometheus/prometheus/util/testutil",
+			"revision": "0471e64ad11ad8fadf063960bbe93bc715539afe",
+			"revisionTime": "2018-01-11T15:10:25Z"
+		},
+		{
+			"checksumSHA1": "+xjNhZQ0LpXzPga0YaofmComiIw=",
+			"path": "github.com/prometheus/prometheus/util/treecache",
+			"revision": "0471e64ad11ad8fadf063960bbe93bc715539afe",
+			"revisionTime": "2018-01-11T15:10:25Z"
+		},
+		{
+			"checksumSHA1": "FNv5iDswNKRR42e8DxgLBQnXtok=",
+			"path": "github.com/prometheus/prometheus/util/yaml",
+			"revision": "0471e64ad11ad8fadf063960bbe93bc715539afe",
+			"revisionTime": "2018-01-11T15:10:25Z"
+		},
+		{
+			"checksumSHA1": "P+GJJO1vZ6jndHp++oH0r6TVIcM=",
+			"path": "github.com/prometheus/prometheus/web",
+			"revision": "0471e64ad11ad8fadf063960bbe93bc715539afe",
+			"revisionTime": "2018-01-11T15:10:25Z"
+		},
+		{
+			"checksumSHA1": "2Eh7v+ctpoPeujFRBRLfzTrSND0=",
+			"path": "github.com/prometheus/prometheus/web/api/v1",
+			"revision": "0471e64ad11ad8fadf063960bbe93bc715539afe",
+			"revisionTime": "2018-01-11T15:10:25Z"
+		},
+		{
+			"checksumSHA1": "Vj7bZmmOzq8TUrZy5+PYaoLsjbY=",
+			"path": "github.com/prometheus/prometheus/web/api/v2",
+			"revision": "0471e64ad11ad8fadf063960bbe93bc715539afe",
+			"revisionTime": "2018-01-11T15:10:25Z"
+		},
+		{
+			"checksumSHA1": "Z4IPrC1DnsZKBl+bnkv9IgwTi5g=",
+			"path": "github.com/prometheus/prometheus/web/ui",
+			"revision": "0471e64ad11ad8fadf063960bbe93bc715539afe",
+			"revisionTime": "2018-01-11T15:10:25Z"
+		},
+		{
 			"checksumSHA1": "C72p7MMwA94LrpqYD3dMcQEKHzY=",
 			"path": "github.com/prometheus/tsdb",
 			"revision": "07ef80820ef1250db82f9544f3fcf7f0f63ccee0",
@@ -1970,5 +2246,5 @@
 			"revisionTime": "2017-03-31T20:34:26Z"
 		}
 	],
-	"rootPath": "github.com/prometheus/prometheus"
+	"rootPath": "github.com/jkohen/prometheus"
 }
