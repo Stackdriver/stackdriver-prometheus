@@ -37,7 +37,6 @@ import (
 	"github.com/oklog/oklog/pkg/group"
 	"github.com/pkg/errors"
 	"github.com/prometheus/client_golang/prometheus"
-	"github.com/prometheus/common/model"
 	"github.com/prometheus/common/version"
 	k8s_runtime "k8s.io/apimachinery/pkg/util/runtime"
 
@@ -49,7 +48,6 @@ import (
 	"github.com/prometheus/prometheus/storage"
 	"github.com/prometheus/prometheus/storage/remote"
 	"github.com/prometheus/prometheus/storage/tsdb"
-	"github.com/prometheus/prometheus/web"
 )
 
 var (
@@ -79,9 +77,7 @@ func main() {
 		configFile string
 
 		localStoragePath string
-		web              web.Options
 		tsdb             tsdb.Options
-		webTimeout       model.Duration
 
 		prometheusURL string
 
@@ -96,39 +92,6 @@ func main() {
 
 	a.Flag("config.file", "Prometheus configuration file path.").
 		Default("prometheus.yml").StringVar(&cfg.configFile)
-
-	a.Flag("web.listen-address", "Address to listen on for UI, API, and telemetry.").
-		Default("0.0.0.0:9090").StringVar(&cfg.web.ListenAddress)
-
-	a.Flag("web.read-timeout",
-		"Maximum duration before timing out read of the request, and closing idle connections.").
-		Default("5m").SetValue(&cfg.webTimeout)
-
-	a.Flag("web.max-connections", "Maximum number of simultaneous connections.").
-		Default("512").IntVar(&cfg.web.MaxConnections)
-
-	a.Flag("web.external-url",
-		"The URL under which Prometheus is externally reachable (for example, if Prometheus is served via a reverse proxy). Used for generating relative and absolute links back to Prometheus itself. If the URL has a path portion, it will be used to prefix all HTTP endpoints served by Prometheus. If omitted, relevant URL components will be derived automatically.").
-		PlaceHolder("<URL>").StringVar(&cfg.prometheusURL)
-
-	a.Flag("web.route-prefix",
-		"Prefix for the internal routes of web endpoints. Defaults to path of --web.external-url.").
-		PlaceHolder("<path>").StringVar(&cfg.web.RoutePrefix)
-
-	a.Flag("web.user-assets", "Path to static asset directory, available at /user.").
-		PlaceHolder("<path>").StringVar(&cfg.web.UserAssetsPath)
-
-	a.Flag("web.enable-lifecycle", "Enable shutdown and reload via HTTP request.").
-		Default("false").BoolVar(&cfg.web.EnableLifecycle)
-
-	a.Flag("web.enable-admin-api", "Enables API endpoints for admin control actions.").
-		Default("false").BoolVar(&cfg.web.EnableAdminAPI)
-
-	a.Flag("web.console.templates", "Path to the console template directory, available at /consoles.").
-		Default("consoles").StringVar(&cfg.web.ConsoleTemplatesPath)
-
-	a.Flag("web.console.libraries", "Path to the console library directory.").
-		Default("console_libraries").StringVar(&cfg.web.ConsoleLibrariesPath)
 
 	a.Flag("storage.tsdb.path", "Base path for metrics storage.").
 		Default("data/").StringVar(&cfg.localStoragePath)
@@ -154,20 +117,6 @@ func main() {
 		a.Usage(os.Args[1:])
 		os.Exit(2)
 	}
-
-	cfg.web.ExternalURL, err = computeExternalURL(cfg.prometheusURL, cfg.web.ListenAddress)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, errors.Wrapf(err, "parse external URL %q", cfg.prometheusURL))
-		os.Exit(2)
-	}
-
-	cfg.web.ReadTimeout = time.Duration(cfg.webTimeout)
-	// Default -web.route-prefix to path of -web.external-url.
-	if cfg.web.RoutePrefix == "" {
-		cfg.web.RoutePrefix = cfg.web.ExternalURL.Path
-	}
-	// RoutePrefix must always be at least '/'.
-	cfg.web.RoutePrefix = "/" + strings.Trim(cfg.web.RoutePrefix, "/")
 
 	if cfg.tsdb.MaxBlockDuration == 0 {
 		cfg.tsdb.MaxBlockDuration = cfg.tsdb.Retention / 10
@@ -196,33 +145,9 @@ func main() {
 	)
 
 	var (
-		ctxWeb, cancelWeb = context.WithCancel(context.Background())
-
 		discoveryManager = discovery.NewManager(log.With(logger, "component", "discovery manager"))
 		scrapeManager    = retrieval.NewScrapeManager(log.With(logger, "component", "scrape manager"), fanoutStorage)
 	)
-
-	cfg.web.Context = ctxWeb
-	cfg.web.TSDB = localStorage.Get
-	cfg.web.Storage = fanoutStorage
-	cfg.web.ScrapeManager = scrapeManager
-
-	cfg.web.Version = &web.PrometheusVersion{
-		Version:   version.Version,
-		Revision:  version.Revision,
-		Branch:    version.Branch,
-		BuildUser: version.BuildUser,
-		BuildDate: version.BuildDate,
-		GoVersion: version.GoVersion,
-	}
-
-	cfg.web.Flags = map[string]string{}
-	for _, f := range a.Model().Flags {
-		cfg.web.Flags[f.Name] = f.Value.String()
-	}
-
-	// Depends on cfg.web.ScrapeManager so needs to be after cfg.web.ScrapeManager = scrapeManager
-	webHandler := web.New(log.With(logger, "component", "web"), &cfg.web)
 
 	// Monitor outgoing connections on default transport with conntrack.
 	http.DefaultTransport.(*http.Transport).DialContext = conntrack.NewDialContextFunc(
@@ -231,7 +156,6 @@ func main() {
 
 	reloaders := []func(cfg *config.Config) error{
 		remoteStorage.ApplyConfig,
-		webHandler.ApplyConfig,
 		discoveryManager.ApplyConfig,
 		scrapeManager.ApplyConfig,
 	}
@@ -255,8 +179,6 @@ func main() {
 				select {
 				case <-term:
 					level.Warn(logger).Log("msg", "Received SIGTERM, exiting gracefully...")
-				case <-webHandler.Quit():
-					level.Warn(logger).Log("msg", "Received termination request via web service, exiting gracefully...")
 				case <-cancel:
 					break
 				}
@@ -318,13 +240,6 @@ func main() {
 						if err := reloadConfig(cfg.configFile, logger, reloaders...); err != nil {
 							level.Error(logger).Log("msg", "Error reloading config", "err", err)
 						}
-					case rc := <-webHandler.Reload():
-						if err := reloadConfig(cfg.configFile, logger, reloaders...); err != nil {
-							level.Error(logger).Log("msg", "Error reloading config", "err", err)
-							rc <- err
-						} else {
-							rc <- nil
-						}
 					case <-cancel:
 						return nil
 					}
@@ -353,7 +268,6 @@ func main() {
 				}
 
 				close(reloadReady)
-				webHandler.Ready()
 				level.Info(logger).Log("msg", "Server is ready to receive requests.")
 				<-cancel
 				return nil
@@ -390,19 +304,6 @@ func main() {
 					level.Error(logger).Log("msg", "Error stopping storage", "err", err)
 				}
 				close(cancel)
-			},
-		)
-	}
-	{
-		g.Add(
-			func() error {
-				if err := webHandler.Run(ctxWeb); err != nil {
-					return fmt.Errorf("Error starting web server: %s", err)
-				}
-				return nil
-			},
-			func(err error) {
-				cancelWeb()
 			},
 		)
 	}
