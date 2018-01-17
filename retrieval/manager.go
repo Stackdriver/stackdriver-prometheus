@@ -21,12 +21,11 @@ import (
 
 	"github.com/prometheus/prometheus/config"
 	"github.com/prometheus/prometheus/discovery/targetgroup"
-	"github.com/prometheus/prometheus/storage"
 )
 
 // Appendable returns an Appender.
 type Appendable interface {
-	Appender() (storage.Appender, error)
+	Appender() (Appender, error)
 }
 
 // NewScrapeManager is the ScrapeManager constructor

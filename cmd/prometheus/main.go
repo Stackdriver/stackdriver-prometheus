@@ -40,14 +40,12 @@ import (
 	"github.com/prometheus/common/version"
 	k8s_runtime "k8s.io/apimachinery/pkg/util/runtime"
 
+	"github.com/jkohen/prometheus/retrieval"
+	"github.com/jkohen/prometheus/stackdriver"
 	"github.com/prometheus/common/promlog"
 	promlogflag "github.com/prometheus/common/promlog/flag"
 	"github.com/prometheus/prometheus/config"
 	"github.com/prometheus/prometheus/discovery"
-	"github.com/prometheus/prometheus/retrieval"
-	"github.com/prometheus/prometheus/storage"
-	"github.com/prometheus/prometheus/storage/remote"
-	"github.com/prometheus/prometheus/storage/tsdb"
 )
 
 var (
@@ -76,9 +74,6 @@ func main() {
 	cfg := struct {
 		configFile string
 
-		localStoragePath string
-		tsdb             tsdb.Options
-
 		prometheusURL string
 
 		logLevel promlog.AllowedLevel
@@ -93,22 +88,6 @@ func main() {
 	a.Flag("config.file", "Prometheus configuration file path.").
 		Default("prometheus.yml").StringVar(&cfg.configFile)
 
-	a.Flag("storage.tsdb.path", "Base path for metrics storage.").
-		Default("data/").StringVar(&cfg.localStoragePath)
-
-	a.Flag("storage.tsdb.min-block-duration", "Minimum duration of a data block before being persisted. For use in testing.").
-		Hidden().Default("2h").SetValue(&cfg.tsdb.MinBlockDuration)
-
-	a.Flag("storage.tsdb.max-block-duration",
-		"Maximum duration compacted blocks may span. For use in testing. (Defaults to 10% of the retention period).").
-		Hidden().PlaceHolder("<duration>").SetValue(&cfg.tsdb.MaxBlockDuration)
-
-	a.Flag("storage.tsdb.retention", "How long to retain samples in the storage.").
-		Default("15d").SetValue(&cfg.tsdb.Retention)
-
-	a.Flag("storage.tsdb.no-lockfile", "Do not create lockfile in data directory.").
-		Default("false").BoolVar(&cfg.tsdb.NoLockfile)
-
 	promlogflag.AddFlags(a, &cfg.logLevel)
 
 	_, err := a.Parse(os.Args[1:])
@@ -116,10 +95,6 @@ func main() {
 		fmt.Fprintln(os.Stderr, errors.Wrapf(err, "Error parsing commandline arguments"))
 		a.Usage(os.Args[1:])
 		os.Exit(2)
-	}
-
-	if cfg.tsdb.MaxBlockDuration == 0 {
-		cfg.tsdb.MaxBlockDuration = cfg.tsdb.Retention / 10
 	}
 
 	logger := promlog.New(cfg.logLevel)
@@ -139,14 +114,12 @@ func main() {
 	level.Info(logger).Log("fd_limits", FdLimits())
 
 	var (
-		localStorage  = &tsdb.ReadyStorage{}
-		remoteStorage = remote.NewStorage(log.With(logger, "component", "remote"), localStorage.StartTime)
-		fanoutStorage = storage.NewFanout(logger, localStorage, remoteStorage)
+		remoteStorage = stackdriver.NewStorage(log.With(logger, "component", "remote"))
 	)
 
 	var (
 		discoveryManager = discovery.NewManager(log.With(logger, "component", "discovery manager"))
-		scrapeManager    = retrieval.NewScrapeManager(log.With(logger, "component", "scrape manager"), fanoutStorage)
+		scrapeManager    = retrieval.NewScrapeManager(log.With(logger, "component", "scrape manager"), remoteStorage)
 	)
 
 	// Monitor outgoing connections on default transport with conntrack.
@@ -211,7 +184,7 @@ func main() {
 				return err
 			},
 			func(err error) {
-				// Scrape manager needs to be stopped before closing the local TSDB
+				// Scrape manager needs to be stopped before closing the TSDB
 				// so that it doesn't try to write samples to a closed storage.
 				level.Info(logger).Log("msg", "Stopping scrape manager...")
 				scrapeManager.Stop()
@@ -281,27 +254,15 @@ func main() {
 		cancel := make(chan struct{})
 		g.Add(
 			func() error {
-				level.Info(logger).Log("msg", "Starting TSDB ...")
-				db, err := tsdb.Open(
-					cfg.localStoragePath,
-					log.With(logger, "component", "tsdb"),
-					prometheus.DefaultRegisterer,
-					&cfg.tsdb,
-				)
-				if err != nil {
-					return fmt.Errorf("Opening storage failed %s", err)
-				}
-				level.Info(logger).Log("msg", "TSDB started")
-
-				startTimeMargin := int64(2 * time.Duration(cfg.tsdb.MinBlockDuration).Seconds() * 1000)
-				localStorage.Set(db, startTimeMargin)
+				// Any Stackdriver client initialization goes here.
+				level.Info(logger).Log("msg", "Stackdriver client started")
 				close(dbOpen)
 				<-cancel
 				return nil
 			},
 			func(err error) {
-				if err := fanoutStorage.Close(); err != nil {
-					level.Error(logger).Log("msg", "Error stopping storage", "err", err)
+				if err := remoteStorage.Close(); err != nil {
+					level.Error(logger).Log("msg", "Error stopping Stackdriver client", "err", err)
 				}
 				close(cancel)
 			},

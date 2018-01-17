@@ -38,7 +38,6 @@ import (
 	"github.com/prometheus/prometheus/pkg/labels"
 	"github.com/prometheus/prometheus/pkg/timestamp"
 	"github.com/prometheus/prometheus/pkg/value"
-	"github.com/prometheus/prometheus/storage"
 	"github.com/prometheus/prometheus/util/testutil"
 )
 
@@ -324,7 +323,7 @@ func TestScrapeLoopStop(t *testing.T) {
 		signal   = make(chan struct{})
 		appender = &collectResultAppender{}
 		scraper  = &testScraper{}
-		app      = func() storage.Appender { return appender }
+		app      = func() Appender { return appender }
 	)
 	defer close(signal)
 
@@ -387,7 +386,7 @@ func TestScrapeLoopRun(t *testing.T) {
 		errc   = make(chan error)
 
 		scraper = &testScraper{}
-		app     = func() storage.Appender { return &nopAppender{} }
+		app     = func() Appender { return &nopAppender{} }
 	)
 	defer close(signal)
 
@@ -479,7 +478,7 @@ func TestScrapeLoopRunCreatesStaleMarkersOnFailedScrape(t *testing.T) {
 	var (
 		signal  = make(chan struct{})
 		scraper = &testScraper{}
-		app     = func() storage.Appender { return appender }
+		app     = func() Appender { return appender }
 	)
 	defer close(signal)
 
@@ -535,7 +534,7 @@ func TestScrapeLoopRunCreatesStaleMarkersOnParseFailure(t *testing.T) {
 	var (
 		signal     = make(chan struct{})
 		scraper    = &testScraper{}
-		app        = func() storage.Appender { return appender }
+		app        = func() Appender { return appender }
 		numScrapes = 0
 	)
 	defer close(signal)
@@ -596,7 +595,7 @@ func TestScrapeLoopAppend(t *testing.T) {
 		nil, nil, nil,
 		nopMutator,
 		nopMutator,
-		func() storage.Appender { return app },
+		func() Appender { return app },
 	)
 
 	now := time.Now()
@@ -637,7 +636,7 @@ func TestScrapeLoopAppendSampleLimit(t *testing.T) {
 		nil, nil, nil,
 		nopMutator,
 		nopMutator,
-		func() storage.Appender { return app },
+		func() Appender { return app },
 	)
 
 	// Get the value of the Counter before performing the append.
@@ -696,7 +695,7 @@ func TestScrapeLoop_ChangingMetricString(t *testing.T) {
 		nil, nil, nil,
 		nopMutator,
 		nopMutator,
-		func() storage.Appender { return capp },
+		func() Appender { return capp },
 	)
 
 	now := time.Now()
@@ -734,7 +733,7 @@ func TestScrapeLoopAppendStaleness(t *testing.T) {
 		nil, nil, nil,
 		nopMutator,
 		nopMutator,
-		func() storage.Appender { return app },
+		func() Appender { return app },
 	)
 
 	now := time.Now()
@@ -778,7 +777,7 @@ func TestScrapeLoopAppendNoStalenessIfTimestamp(t *testing.T) {
 		nil, nil, nil,
 		nopMutator,
 		nopMutator,
-		func() storage.Appender { return app },
+		func() Appender { return app },
 	)
 
 	now := time.Now()
@@ -807,7 +806,7 @@ func TestScrapeLoopRunReportsTargetDownOnScrapeError(t *testing.T) {
 	var (
 		scraper  = &testScraper{}
 		appender = &collectResultAppender{}
-		app      = func() storage.Appender { return appender }
+		app      = func() Appender { return appender }
 	)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -835,7 +834,7 @@ func TestScrapeLoopRunReportsTargetDownOnInvalidUTF8(t *testing.T) {
 	var (
 		scraper  = &testScraper{}
 		appender = &collectResultAppender{}
-		app      = func() storage.Appender { return appender }
+		app      = func() Appender { return appender }
 	)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -867,11 +866,11 @@ type errorAppender struct {
 func (app *errorAppender) Add(lset labels.Labels, t int64, v float64) (uint64, error) {
 	switch lset.Get(model.MetricNameLabel) {
 	case "out_of_order":
-		return 0, storage.ErrOutOfOrderSample
+		return 0, ErrOutOfOrderSample
 	case "amend":
-		return 0, storage.ErrDuplicateSampleForTimestamp
+		return 0, ErrDuplicateSampleForTimestamp
 	case "out_of_bounds":
-		return 0, storage.ErrOutOfBounds
+		return 0, ErrOutOfBounds
 	default:
 		return app.collectResultAppender.Add(lset, t, v)
 	}
@@ -889,7 +888,7 @@ func TestScrapeLoopAppendGracefullyIfAmendOrOutOfOrderOrOutOfBounds(t *testing.T
 		nil, nil,
 		nopMutator,
 		nopMutator,
-		func() storage.Appender { return app },
+		func() Appender { return app },
 	)
 
 	now := time.Unix(1, 0)
@@ -916,7 +915,7 @@ func TestScrapeLoopOutOfBoundsTimeError(t *testing.T) {
 		nil, nil,
 		nopMutator,
 		nopMutator,
-		func() storage.Appender {
+		func() Appender {
 			return &timeLimitAppender{
 				Appender: app,
 				maxTime:  timestamp.FromTime(time.Now().Add(10 * time.Minute)),

@@ -15,12 +15,11 @@ package retrieval
 
 import (
 	"github.com/prometheus/prometheus/pkg/labels"
-	"github.com/prometheus/prometheus/storage"
 )
 
 type nopAppendable struct{}
 
-func (a nopAppendable) Appender() (storage.Appender, error) {
+func (a nopAppendable) Appender() (Appender, error) {
 	return nopAppender{}, nil
 }
 
@@ -34,13 +33,13 @@ func (a nopAppender) Rollback() error                                     { retu
 // collectResultAppender records all samples that were added through the appender.
 // It can be used as its zero value or be backed by another appender it writes samples through.
 type collectResultAppender struct {
-	next   storage.Appender
+	next   Appender
 	result []sample
 }
 
 func (a *collectResultAppender) AddFast(m labels.Labels, ref uint64, t int64, v float64) error {
 	if a.next == nil {
-		return storage.ErrNotFound
+		return ErrNotFound
 	}
 	err := a.next.AddFast(m, ref, t, v)
 	if err != nil {

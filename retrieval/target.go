@@ -23,14 +23,13 @@ import (
 	"sync"
 	"time"
 
+	dto "github.com/prometheus/client_model/go"
 	"github.com/prometheus/common/model"
 
 	"github.com/prometheus/prometheus/config"
 	"github.com/prometheus/prometheus/discovery/targetgroup"
 	"github.com/prometheus/prometheus/pkg/labels"
 	"github.com/prometheus/prometheus/pkg/relabel"
-	"github.com/prometheus/prometheus/pkg/value"
-	"github.com/prometheus/prometheus/storage"
 )
 
 // TargetHealth describes the health state of a target.
@@ -193,61 +192,33 @@ var errSampleLimit = errors.New("sample limit exceeded")
 
 // limitAppender limits the number of total appended samples in a batch.
 type limitAppender struct {
-	storage.Appender
+	Appender
 
 	limit int
 	i     int
 }
 
-func (app *limitAppender) Add(lset labels.Labels, t int64, v float64) (uint64, error) {
-	if !value.IsStaleNaN(v) {
-		app.i++
-		if app.i > app.limit {
-			return 0, errSampleLimit
-		}
+func (app *limitAppender) Add(metricFamily *dto.MetricFamily) error {
+	app.i++
+	if app.i > app.limit {
+		return errSampleLimit
 	}
-	ref, err := app.Appender.Add(lset, t, v)
-	if err != nil {
-		return 0, err
-	}
-	return ref, nil
-}
-
-func (app *limitAppender) AddFast(lset labels.Labels, ref uint64, t int64, v float64) error {
-	if !value.IsStaleNaN(v) {
-		app.i++
-		if app.i > app.limit {
-			return errSampleLimit
-		}
-	}
-	err := app.Appender.AddFast(lset, ref, t, v)
-	return err
+	return app.Appender.Add(metricFamily)
 }
 
 type timeLimitAppender struct {
-	storage.Appender
+	Appender
 
 	maxTime int64
 }
 
-func (app *timeLimitAppender) Add(lset labels.Labels, t int64, v float64) (uint64, error) {
-	if t > app.maxTime {
-		return 0, storage.ErrOutOfBounds
-	}
+func (app *timeLimitAppender) Add(metricFamily *dto.MetricFamily) error {
+	// TODO(jkohen): Each metric in a family has an independent timestamp, so we need to check each item individually, if we want to support this.
+	// if t > app.maxTime {
+	// 	return ErrOutOfBounds
+	// }
 
-	ref, err := app.Appender.Add(lset, t, v)
-	if err != nil {
-		return 0, err
-	}
-	return ref, nil
-}
-
-func (app *timeLimitAppender) AddFast(lset labels.Labels, ref uint64, t int64, v float64) error {
-	if t > app.maxTime {
-		return storage.ErrOutOfBounds
-	}
-	err := app.Appender.AddFast(lset, ref, t, v)
-	return err
+	return app.Appender.Add(metricFamily)
 }
 
 // populateLabels builds a label set from the given label set and scrape configuration.
