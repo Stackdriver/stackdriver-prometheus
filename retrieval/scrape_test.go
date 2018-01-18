@@ -19,7 +19,6 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
-	"math"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -29,6 +28,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gogo/protobuf/proto"
 	"github.com/prometheus/common/model"
 	"github.com/stretchr/testify/require"
 
@@ -37,8 +37,6 @@ import (
 	"github.com/prometheus/prometheus/config"
 	"github.com/prometheus/prometheus/pkg/labels"
 	"github.com/prometheus/prometheus/pkg/timestamp"
-	"github.com/prometheus/prometheus/pkg/value"
-	"github.com/prometheus/prometheus/util/testutil"
 )
 
 func TestNewScrapePool(t *testing.T) {
@@ -359,23 +357,19 @@ func TestScrapeLoopStop(t *testing.T) {
 	}
 
 	// We expected 1 actual sample for each scrape plus 4 for report samples.
-	// At least 2 scrapes were made, plus the final stale markers.
-	if len(appender.result) < 5*3 || len(appender.result)%5 != 0 {
-		t.Fatalf("Expected at least 3 scrapes with 4 samples each, got %d samples", len(appender.result))
+	// At least 2 scrapes were made.
+	if len(appender.result) < 5*2 || len(appender.result)%5 != 0 {
+		t.Fatalf("Expected at least 2 scrapes with 4 samples each, got %d samples", len(appender.result))
 	}
 	// All samples in a scrape must have the same timestmap.
 	var ts int64
-	for i, s := range appender.result {
-		if i%5 == 0 {
-			ts = s.t
-		} else if s.t != ts {
-			t.Fatalf("Unexpected multiple timestamps within single scrape")
-		}
-	}
-	// All samples from the last scrape must be stale markers.
-	for _, s := range appender.result[len(appender.result)-5:] {
-		if !value.IsStaleNaN(s.v) {
-			t.Fatalf("Appended last sample not as expected. Wanted: stale NaN Got: %x", math.Float64bits(s.v))
+	for i, family := range appender.result {
+		for _, metric := range family.Metric {
+			if i%5 == 0 {
+				ts = *metric.TimestampMs
+			} else if *metric.TimestampMs != ts {
+				t.Fatalf("Unexpected multiple timestamps within single scrape")
+			}
 		}
 	}
 }
@@ -473,121 +467,6 @@ func TestScrapeLoopRun(t *testing.T) {
 	}
 }
 
-func TestScrapeLoopRunCreatesStaleMarkersOnFailedScrape(t *testing.T) {
-	appender := &collectResultAppender{}
-	var (
-		signal  = make(chan struct{})
-		scraper = &testScraper{}
-		app     = func() Appender { return appender }
-	)
-	defer close(signal)
-
-	ctx, cancel := context.WithCancel(context.Background())
-	sl := newScrapeLoop(ctx,
-		scraper,
-		nil, nil,
-		nopMutator,
-		nopMutator,
-		app,
-	)
-	// Succeed once, several failures, then stop.
-	numScrapes := 0
-
-	scraper.scrapeFunc = func(ctx context.Context, w io.Writer) error {
-		numScrapes++
-
-		if numScrapes == 1 {
-			w.Write([]byte("metric_a 42\n"))
-			return nil
-		} else if numScrapes == 5 {
-			cancel()
-		}
-		return fmt.Errorf("scrape failed")
-	}
-
-	go func() {
-		sl.run(10*time.Millisecond, time.Hour, nil)
-		signal <- struct{}{}
-	}()
-
-	select {
-	case <-signal:
-	case <-time.After(5 * time.Second):
-		t.Fatalf("Scrape wasn't stopped.")
-	}
-
-	// 1 successfully scraped sample, 1 stale marker after first fail, 4 report samples for
-	// each scrape successful or not.
-	if len(appender.result) != 22 {
-		t.Fatalf("Appended samples not as expected. Wanted: %d samples Got: %d", 22, len(appender.result))
-	}
-	if appender.result[0].v != 42.0 {
-		t.Fatalf("Appended first sample not as expected. Wanted: %f Got: %f", appender.result[0].v, 42.0)
-	}
-	if !value.IsStaleNaN(appender.result[5].v) {
-		t.Fatalf("Appended second sample not as expected. Wanted: stale NaN Got: %x", math.Float64bits(appender.result[5].v))
-	}
-}
-
-func TestScrapeLoopRunCreatesStaleMarkersOnParseFailure(t *testing.T) {
-	appender := &collectResultAppender{}
-	var (
-		signal     = make(chan struct{})
-		scraper    = &testScraper{}
-		app        = func() Appender { return appender }
-		numScrapes = 0
-	)
-	defer close(signal)
-
-	ctx, cancel := context.WithCancel(context.Background())
-	sl := newScrapeLoop(ctx,
-		scraper,
-		nil, nil,
-		nopMutator,
-		nopMutator,
-		app,
-	)
-
-	// Succeed once, several failures, then stop.
-	scraper.scrapeFunc = func(ctx context.Context, w io.Writer) error {
-		numScrapes++
-
-		if numScrapes == 1 {
-			w.Write([]byte("metric_a 42\n"))
-			return nil
-		} else if numScrapes == 2 {
-			w.Write([]byte("7&-\n"))
-			return nil
-		} else if numScrapes == 3 {
-			cancel()
-		}
-		return fmt.Errorf("scrape failed")
-	}
-
-	go func() {
-		sl.run(10*time.Millisecond, time.Hour, nil)
-		signal <- struct{}{}
-	}()
-
-	select {
-	case <-signal:
-	case <-time.After(5 * time.Second):
-		t.Fatalf("Scrape wasn't stopped.")
-	}
-
-	// 1 successfully scraped sample, 1 stale marker after first fail, 4 report samples for
-	// each scrape successful or not.
-	if len(appender.result) != 14 {
-		t.Fatalf("Appended samples not as expected. Wanted: %d samples Got: %d", 22, len(appender.result))
-	}
-	if appender.result[0].v != 42.0 {
-		t.Fatalf("Appended first sample not as expected. Wanted: %f Got: %f", appender.result[0].v, 42.0)
-	}
-	if !value.IsStaleNaN(appender.result[5].v) {
-		t.Fatalf("Appended second sample not as expected. Wanted: stale NaN Got: %x", math.Float64bits(appender.result[5].v))
-	}
-}
-
 func TestScrapeLoopAppend(t *testing.T) {
 	app := &collectResultAppender{}
 
@@ -603,27 +482,14 @@ func TestScrapeLoopAppend(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Unexpected append error: %s", err)
 	}
-
-	ingestedNaN := math.Float64bits(app.result[1].v)
-	if ingestedNaN != value.NormalNaN {
-		t.Fatalf("Appended NaN samples wasn't as expected. Wanted: %x Got: %x", value.NormalNaN, ingestedNaN)
-	}
-
 	// DeepEqual will report NaNs as being different, so replace with a different value.
-	app.result[1].v = 42
-	want := []sample{
-		{
-			metric: labels.FromStrings(model.MetricNameLabel, "metric_a"),
-			t:      timestamp.FromTime(now),
-			v:      1,
-		},
-		{
-			metric: labels.FromStrings(model.MetricNameLabel, "metric_b"),
-			t:      timestamp.FromTime(now),
-			v:      42,
-		},
+	result := app.Sorted()
+	result[1].Metric[0].Untyped.Value = proto.Float64(42)
+	want := []*dto.MetricFamily{
+		untypedFromTriplet("metric_a", timestamp.FromTime(now), 1),
+		untypedFromTriplet("metric_b", timestamp.FromTime(now), 42),
 	}
-	if !reflect.DeepEqual(want, app.result) {
+	if !reflect.DeepEqual(want, result) {
 		t.Fatalf("Appended samples not as expected. Wanted: %+v Got: %+v", want, app.result)
 	}
 }
@@ -665,110 +531,12 @@ func TestScrapeLoopAppendSampleLimit(t *testing.T) {
 		t.Fatal("Unexpected change of sample limit metric: %f", (value - beforeMetricValue))
 	}
 
-	// And verify that we got the samples that fit under the limit.
-	want := []sample{
-		{
-			metric: labels.FromStrings(model.MetricNameLabel, "metric_a"),
-			t:      timestamp.FromTime(now),
-			v:      1,
-		},
+	// And verify that we got the samples that fit under the limit. We
+	// cannot do a deep comparison, because the order of the metrics in the
+	// input is undefined.
+	if len(resApp.result) != 1 {
+		t.Fatalf("Appended samples not as expected. Wanted 1 sample, got: %+v", resApp.result)
 	}
-	if !reflect.DeepEqual(want, resApp.result) {
-		t.Fatalf("Appended samples not as expected. Wanted: %+v Got: %+v", want, resApp.result)
-	}
-}
-
-func TestScrapeLoop_ChangingMetricString(t *testing.T) {
-	// This is a regression test for the scrape loop cache not properly maintaining
-	// IDs when the string representation of a metric changes across a scrape. Thus
-	// we use a real storage appender here.
-	s := testutil.NewStorage(t)
-	defer s.Close()
-
-	app, err := s.Appender()
-	if err != nil {
-		t.Error(err)
-	}
-	capp := &collectResultAppender{next: app}
-
-	sl := newScrapeLoop(context.Background(),
-		nil, nil, nil,
-		nopMutator,
-		nopMutator,
-		func() Appender { return capp },
-	)
-
-	now := time.Now()
-	_, _, err = sl.append([]byte(`metric_a{a="1",b="1"} 1`), now)
-	if err != nil {
-		t.Fatalf("Unexpected append error: %s", err)
-	}
-	_, _, err = sl.append([]byte(`metric_a{b="1",a="1"} 2`), now.Add(time.Minute))
-	if err != nil {
-		t.Fatalf("Unexpected append error: %s", err)
-	}
-
-	// DeepEqual will report NaNs as being different, so replace with a different value.
-	want := []sample{
-		{
-			metric: labels.FromStrings("__name__", "metric_a", "a", "1", "b", "1"),
-			t:      timestamp.FromTime(now),
-			v:      1,
-		},
-		{
-			metric: labels.FromStrings("__name__", "metric_a", "a", "1", "b", "1"),
-			t:      timestamp.FromTime(now.Add(time.Minute)),
-			v:      2,
-		},
-	}
-	if !reflect.DeepEqual(want, capp.result) {
-		t.Fatalf("Appended samples not as expected. Wanted: %+v Got: %+v", want, capp.result)
-	}
-}
-
-func TestScrapeLoopAppendStaleness(t *testing.T) {
-	app := &collectResultAppender{}
-
-	sl := newScrapeLoop(context.Background(),
-		nil, nil, nil,
-		nopMutator,
-		nopMutator,
-		func() Appender { return app },
-	)
-
-	now := time.Now()
-	_, _, err := sl.append([]byte("metric_a 1\n"), now)
-	if err != nil {
-		t.Fatalf("Unexpected append error: %s", err)
-	}
-	_, _, err = sl.append([]byte(""), now.Add(time.Second))
-	if err != nil {
-		t.Fatalf("Unexpected append error: %s", err)
-	}
-
-	ingestedNaN := math.Float64bits(app.result[1].v)
-	if ingestedNaN != value.StaleNaN {
-		t.Fatalf("Appended stale sample wasn't as expected. Wanted: %x Got: %x", value.StaleNaN, ingestedNaN)
-	}
-
-	// DeepEqual will report NaNs as being different, so replace with a different value.
-	app.result[1].v = 42
-	want := []sample{
-		{
-			metric: labels.FromStrings(model.MetricNameLabel, "metric_a"),
-			t:      timestamp.FromTime(now),
-			v:      1,
-		},
-		{
-			metric: labels.FromStrings(model.MetricNameLabel, "metric_a"),
-			t:      timestamp.FromTime(now.Add(time.Second)),
-			v:      42,
-		},
-	}
-	if !reflect.DeepEqual(want, app.result) {
-		t.Fatalf("Appended samples not as expected. Wanted: %+v Got: %+v", want, app.result)
-	}
-
 }
 
 func TestScrapeLoopAppendNoStalenessIfTimestamp(t *testing.T) {
@@ -790,14 +558,10 @@ func TestScrapeLoopAppendNoStalenessIfTimestamp(t *testing.T) {
 		t.Fatalf("Unexpected append error: %s", err)
 	}
 
-	want := []sample{
-		{
-			metric: labels.FromStrings(model.MetricNameLabel, "metric_a"),
-			t:      1000,
-			v:      1,
-		},
+	want := []*dto.MetricFamily{
+		untypedFromTriplet("metric_a", 1000, 1),
 	}
-	if !reflect.DeepEqual(want, app.result) {
+	if !reflect.DeepEqual(want, app.Sorted()) {
 		t.Fatalf("Appended samples not as expected. Wanted: %+v Got: %+v", want, app.result)
 	}
 }
@@ -825,8 +589,15 @@ func TestScrapeLoopRunReportsTargetDownOnScrapeError(t *testing.T) {
 
 	sl.run(10*time.Millisecond, time.Hour, nil)
 
-	if appender.result[0].v != 0 {
-		t.Fatalf("bad 'up' value; want 0, got %v", appender.result[0].v)
+	if appender.result == nil {
+		t.Fatalf("missing 'up' value; got no results")
+	}
+	if appender.result[0].Metric == nil ||
+		appender.result[0].Metric[0].GetGauge().Value == nil {
+		t.Fatalf("missing 'up' value; MetricFamily is <%v>", appender.result[0].String())
+	}
+	if *appender.result[0].Metric[0].Gauge.Value != 0 {
+		t.Fatalf("bad 'up' value; want 0, got %v", *appender.result[0].Metric[0].Gauge.Value)
 	}
 }
 
@@ -854,8 +625,15 @@ func TestScrapeLoopRunReportsTargetDownOnInvalidUTF8(t *testing.T) {
 
 	sl.run(10*time.Millisecond, time.Hour, nil)
 
-	if appender.result[0].v != 0 {
-		t.Fatalf("bad 'up' value; want 0, got %v", appender.result[0].v)
+	if appender.result == nil {
+		t.Fatalf("missing 'up' value; got no results")
+	}
+	if appender.result[0].Metric == nil ||
+		appender.result[0].Metric[0].GetGauge().Value == nil {
+		t.Fatalf("missing 'up' value; MetricFamily is <%v>", appender.result[0].String())
+	}
+	if *appender.result[0].Metric[0].Gauge.Value != 0 {
+		t.Fatalf("bad 'up' value; want 0, got %v", appender.result[0].Metric[0].Gauge.Value)
 	}
 }
 
@@ -863,21 +641,17 @@ type errorAppender struct {
 	collectResultAppender
 }
 
-func (app *errorAppender) Add(lset labels.Labels, t int64, v float64) (uint64, error) {
-	switch lset.Get(model.MetricNameLabel) {
+func (app *errorAppender) Add(metricFamily *dto.MetricFamily) error {
+	switch *metricFamily.Name {
 	case "out_of_order":
-		return 0, ErrOutOfOrderSample
+		return ErrOutOfOrderSample
 	case "amend":
-		return 0, ErrDuplicateSampleForTimestamp
+		return ErrDuplicateSampleForTimestamp
 	case "out_of_bounds":
-		return 0, ErrOutOfBounds
+		return ErrOutOfBounds
 	default:
-		return app.collectResultAppender.Add(lset, t, v)
+		return app.collectResultAppender.Add(metricFamily)
 	}
-}
-
-func (app *errorAppender) AddFast(lset labels.Labels, ref uint64, t int64, v float64) error {
-	return app.collectResultAppender.AddFast(lset, ref, t, v)
 }
 
 func TestScrapeLoopAppendGracefullyIfAmendOrOutOfOrderOrOutOfBounds(t *testing.T) {
@@ -896,14 +670,10 @@ func TestScrapeLoopAppendGracefullyIfAmendOrOutOfOrderOrOutOfBounds(t *testing.T
 	if err != nil {
 		t.Fatalf("Unexpected append error: %s", err)
 	}
-	want := []sample{
-		{
-			metric: labels.FromStrings(model.MetricNameLabel, "normal"),
-			t:      timestamp.FromTime(now),
-			v:      1,
-		},
+	want := []*dto.MetricFamily{
+		untypedFromTriplet("normal", timestamp.FromTime(now), 1),
 	}
-	if !reflect.DeepEqual(want, app.result) {
+	if !reflect.DeepEqual(want, app.Sorted()) {
 		t.Fatalf("Appended samples not as expected. Wanted: %+v Got: %+v", want, app.result)
 	}
 }
@@ -1095,4 +865,20 @@ func (ts *testScraper) scrape(ctx context.Context, w io.Writer) error {
 		return ts.scrapeFunc(ctx, w)
 	}
 	return ts.scrapeErr
+}
+
+// untypedFromTriplet is a helper to adapt Prometheus unit tests to the new API based on dto.MetricFamily.
+func untypedFromTriplet(name string, t int64, v float64) *dto.MetricFamily {
+	return &dto.MetricFamily{
+		Name: proto.String(name),
+		Type: dto.MetricType_UNTYPED.Enum(),
+		Metric: []*dto.Metric{
+			&dto.Metric{
+				Untyped: &dto.Untyped{
+					Value: proto.Float64(v),
+				},
+				TimestampMs: proto.Int64(t),
+			},
+		},
+	}
 }

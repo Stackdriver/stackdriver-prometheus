@@ -199,7 +199,8 @@ type limitAppender struct {
 }
 
 func (app *limitAppender) Add(metricFamily *dto.MetricFamily) error {
-	app.i++
+	app.i += len(metricFamily.Metric)
+	fmt.Println(app.i, app.limit)
 	if app.i > app.limit {
 		return errSampleLimit
 	}
@@ -213,10 +214,14 @@ type timeLimitAppender struct {
 }
 
 func (app *timeLimitAppender) Add(metricFamily *dto.MetricFamily) error {
-	// TODO(jkohen): Each metric in a family has an independent timestamp, so we need to check each item individually, if we want to support this.
-	// if t > app.maxTime {
-	// 	return ErrOutOfBounds
-	// }
+	// Each metric in a family has an independent timestamp, so we should
+	// filter each selectively. On the other hand, this is probably rare, so
+	// if any metric fails to comply we just reject the entire family.
+	for _, metric := range metricFamily.Metric {
+		if metric.GetTimestampMs() > app.maxTime {
+			return ErrOutOfBounds
+		}
+	}
 
 	return app.Appender.Add(metricFamily)
 }

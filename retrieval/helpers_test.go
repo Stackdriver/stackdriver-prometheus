@@ -14,7 +14,9 @@
 package retrieval
 
 import (
-	"github.com/prometheus/prometheus/pkg/labels"
+	"sort"
+
+	dto "github.com/prometheus/client_model/go"
 )
 
 type nopAppendable struct{}
@@ -25,45 +27,35 @@ func (a nopAppendable) Appender() (Appender, error) {
 
 type nopAppender struct{}
 
-func (a nopAppender) Add(labels.Labels, int64, float64) (uint64, error)   { return 0, nil }
-func (a nopAppender) AddFast(labels.Labels, uint64, int64, float64) error { return nil }
-func (a nopAppender) Commit() error                                       { return nil }
-func (a nopAppender) Rollback() error                                     { return nil }
+func (a nopAppender) Add(metricFamily *dto.MetricFamily) error { return nil }
 
 // collectResultAppender records all samples that were added through the appender.
 // It can be used as its zero value or be backed by another appender it writes samples through.
 type collectResultAppender struct {
 	next   Appender
-	result []sample
+	result []*dto.MetricFamily
 }
 
-func (a *collectResultAppender) AddFast(m labels.Labels, ref uint64, t int64, v float64) error {
+func (a *collectResultAppender) Add(metricFamily *dto.MetricFamily) error {
+	a.result = append(a.result, metricFamily)
 	if a.next == nil {
-		return ErrNotFound
+		return nil
 	}
-	err := a.next.AddFast(m, ref, t, v)
-	if err != nil {
-		return err
-	}
-	a.result = append(a.result, sample{
-		metric: m,
-		t:      t,
-		v:      v,
-	})
-	return err
+	return a.next.Add(metricFamily)
 }
 
-func (a *collectResultAppender) Add(m labels.Labels, t int64, v float64) (uint64, error) {
-	a.result = append(a.result, sample{
-		metric: m,
-		t:      t,
-		v:      v,
-	})
-	if a.next == nil {
-		return 0, nil
-	}
-	return a.next.Add(m, t, v)
-}
+// ByName implements sort.Interface for []*dto.MetricFamily based on the Name
+// field.
+type ByName []*dto.MetricFamily
 
-func (a *collectResultAppender) Commit() error   { return nil }
-func (a *collectResultAppender) Rollback() error { return nil }
+func (f ByName) Len() int           { return len(f) }
+func (f ByName) Swap(i, j int)      { f[i], f[j] = f[j], f[i] }
+func (f ByName) Less(i, j int) bool { return f[i].GetName() < f[j].GetName() }
+
+// Sorted returns the collected samples in deterministic order, to help in tests.
+func (a *collectResultAppender) Sorted() []*dto.MetricFamily {
+	tmp := make([]*dto.MetricFamily, len(a.result))
+	copy(tmp, a.result)
+	sort.Sort(ByName(tmp))
+	return tmp
+}

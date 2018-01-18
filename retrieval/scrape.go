@@ -27,6 +27,7 @@ import (
 
 	"github.com/go-kit/kit/log"
 	"github.com/go-kit/kit/log/level"
+	"github.com/gogo/protobuf/proto"
 	"github.com/prometheus/client_golang/prometheus"
 	dto "github.com/prometheus/client_model/go"
 	"github.com/prometheus/common/expfmt"
@@ -558,28 +559,28 @@ mainLoop:
 			if len(b) > 0 {
 				sl.lastScrapeSize = len(b)
 			}
-
-			// A failed scrape is the same as an empty scrape,
-			// we still call sl.append to trigger stale markers.
-			total, added, appErr := sl.append(b, start)
-			if appErr != nil {
-				level.Warn(sl.l).Log("msg", "append failed", "err", appErr)
-			}
-
-			sl.buffers.Put(b)
-
-			if scrapeErr == nil {
-				scrapeErr = appErr
-			}
-
-			sl.report(start, time.Since(start), total, added, scrapeErr)
-			last = start
 		} else {
 			level.Debug(sl.l).Log("msg", "Scrape failed", "err", scrapeErr.Error())
 			if errc != nil {
 				errc <- scrapeErr
 			}
 		}
+
+		// A failed scrape is the same as an empty scrape,
+		// we still call sl.append to report metrics like "up".
+		total, added, appErr := sl.append(b, start)
+		if appErr != nil {
+			level.Warn(sl.l).Log("msg", "append failed", "err", appErr)
+		}
+
+		sl.buffers.Put(b)
+
+		if scrapeErr == nil {
+			scrapeErr = appErr
+		}
+
+		sl.report(start, time.Since(start), total, added, scrapeErr)
+		last = start
 
 		select {
 		case <-sl.ctx.Done():
@@ -634,11 +635,11 @@ func (sl *scrapeLoop) append(b []byte, ts time.Time) (total, added int, err erro
 	var sampleLimitErr error
 
 loop:
-	for met, metricFamily := range metricFamilies {
+	for name, metricFamily := range metricFamilies {
 		total++
 		for _, metric := range metricFamily.Metric {
 			if metric.TimestampMs == nil {
-				*metric.TimestampMs = defTime
+				metric.TimestampMs = proto.Int64(defTime)
 			}
 			// TODO(jkohen): Here is where we would make a guess at reset timestamp.
 
@@ -662,19 +663,19 @@ loop:
 		case ErrOutOfOrderSample:
 			err = nil
 			numOutOfOrder++
-			level.Debug(sl.l).Log("msg", "Out of order sample", "series", string(met))
+			level.Debug(sl.l).Log("msg", "Out of order sample", "series", string(name))
 			targetScrapeSampleOutOfOrder.Inc()
 			continue
 		case ErrDuplicateSampleForTimestamp:
 			err = nil
 			numDuplicates++
-			level.Debug(sl.l).Log("msg", "Duplicate sample for timestamp", "series", string(met))
+			level.Debug(sl.l).Log("msg", "Duplicate sample for timestamp", "series", string(name))
 			targetScrapeSampleDuplicate.Inc()
 			continue
 		case ErrOutOfBounds:
 			err = nil
 			numOutOfBounds++
-			level.Debug(sl.l).Log("msg", "Out of bounds metric", "series", string(met))
+			level.Debug(sl.l).Log("msg", "Out of bounds metric", "series", string(name))
 			targetScrapeSampleOutOfBounds.Inc()
 			continue
 		case errSampleLimit:
@@ -682,7 +683,7 @@ loop:
 			added++
 			continue
 		default:
-			level.Debug(sl.l).Log("msg", "unexpected error", "series", string(met), "err", err)
+			level.Debug(sl.l).Log("msg", "unexpected error", "series", string(name), "err", err)
 			break loop
 		}
 		added++
@@ -743,24 +744,36 @@ func (sl *scrapeLoop) report(start time.Time, duration time.Duration, scraped, a
 	return nil
 }
 
-func (sl *scrapeLoop) addReportSample(app Appender, s string, t int64, v float64) error {
+func (sl *scrapeLoop) addReportSample(app Appender, name string, t int64, v float64) error {
 	lset := labels.Labels{
-		labels.Label{Name: labels.MetricName, Value: s},
+		labels.Label{Name: labels.MetricName, Value: name},
 	}
 
 	lset = sl.reportSampleMutator(lset)
 
-	// TODO(jkohen): convert (lset, t,v) to MetricFamily.
-	return nil
-	//err := app.Add(lset, t, v)
-	// switch err {
-	// case nil:
-	// 	return nil
-	// case ErrOutOfOrderSample, ErrDuplicateSampleForTimestamp:
-	// 	return nil
-	// default:
-	// 	return err
-	// }
+	// TODO(jkohen): Make the block below modify the metric and, in case of drop, the metric list. Or drop the report sample mutator, since it can only affect the metric name and it seems of limited value.
+
+	metricFamily := &dto.MetricFamily{
+		Name: proto.String(name),
+		Type: dto.MetricType_GAUGE.Enum(),
+		Metric: []*dto.Metric{
+			&dto.Metric{
+				Gauge: &dto.Gauge{
+					Value: proto.Float64(v),
+				},
+				TimestampMs: proto.Int64(t),
+			},
+		},
+	}
+	err := app.Add(metricFamily)
+	switch err {
+	case nil:
+		return nil
+	case ErrOutOfOrderSample, ErrDuplicateSampleForTimestamp:
+		return nil
+	default:
+		return err
+	}
 }
 
 func labelPairsToLabels(input []*dto.LabelPair, output *labels.Labels) {
