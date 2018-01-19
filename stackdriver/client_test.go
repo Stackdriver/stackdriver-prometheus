@@ -23,9 +23,10 @@ import (
 	"testing"
 	"time"
 
+	monitoring "google.golang.org/api/monitoring/v3"
+
 	config_util "github.com/prometheus/common/config"
 	"github.com/prometheus/common/model"
-	"github.com/prometheus/prometheus/prompb"
 )
 
 var longErrMessage = strings.Repeat("error message", maxErrMsgLen)
@@ -73,7 +74,7 @@ func TestStoreHTTPErrorHandling(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		err = c.Store(&prompb.WriteRequest{})
+		err = c.Store(&monitoring.CreateTimeSeriesRequest{})
 		if !reflect.DeepEqual(err, test.err) {
 			t.Errorf("%d. Unexpected error; want %v, got %v", i, test.err, err)
 		}

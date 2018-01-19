@@ -20,7 +20,6 @@ import (
 	"github.com/jkohen/prometheus/retrieval"
 	dto "github.com/prometheus/client_model/go"
 	"github.com/prometheus/prometheus/config"
-	"github.com/prometheus/prometheus/storage/remote"
 )
 
 type Storage struct {
@@ -28,7 +27,7 @@ type Storage struct {
 	mtx    sync.RWMutex
 
 	// For writes
-	queues []*remote.QueueManager
+	queues []*QueueManager
 }
 
 func NewStorage(logger log.Logger) *Storage {
@@ -44,12 +43,23 @@ func (s *Storage) Appender() (retrieval.Appender, error) {
 
 // Add implements the retrieval.Appender interface.
 func (s *Storage) Add(metricFamily *dto.MetricFamily) error {
-	// TODO(jkohen): Implement.
+	s.mtx.RLock()
+	defer s.mtx.RUnlock()
+	for _, q := range s.queues {
+		q.Append(metricFamily)
+	}
 	return nil
 }
 
 // Close closes the storage and all its underlying resources.
 func (s *Storage) Close() error {
+	s.mtx.Lock()
+	defer s.mtx.Unlock()
+
+	for _, q := range s.queues {
+		q.Stop()
+	}
+
 	return nil
 }
 
@@ -60,7 +70,7 @@ func (s *Storage) ApplyConfig(conf *config.Config) error {
 
 	// Update write queues
 
-	newQueues := []*remote.QueueManager{}
+	newQueues := []*QueueManager{}
 	// TODO: we should only stop & recreate queues which have changes,
 	// as this can be quite disruptive.
 	for i, rwConf := range conf.RemoteWriteConfigs {
@@ -72,11 +82,10 @@ func (s *Storage) ApplyConfig(conf *config.Config) error {
 		if err != nil {
 			return err
 		}
-		newQueues = append(newQueues, remote.NewQueueManager(
+		newQueues = append(newQueues, NewQueueManager(
 			s.logger,
 			config.DefaultQueueConfig,
 			conf.GlobalConfig.ExternalLabels,
-			rwConf.WriteRelabelConfigs,
 			c,
 		))
 	}
