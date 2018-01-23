@@ -494,6 +494,109 @@ func TestScrapeLoopAppend(t *testing.T) {
 	}
 }
 
+func TestScrapeLoopMutator(t *testing.T) {
+	app := &collectResultAppender{}
+
+	sl := newScrapeLoop(context.Background(),
+		nil, nil, nil,
+		func(lset labels.Labels) labels.Labels {
+			lb := labels.NewBuilder(lset)
+			lb.Set("new_label", "foo")
+			return lb.Labels()
+		},
+		nopMutator,
+		func() Appender { return app },
+	)
+
+	now := time.Now()
+	_, _, err := sl.append([]byte("metric_a 1\nmetric_b 2\n"), now)
+	if err != nil {
+		t.Fatalf("Unexpected append error: %s", err)
+	}
+	result := app.Sorted()
+	want := []*dto.MetricFamily{
+		addMetricLabels(
+			untypedFromTriplet("metric_a", timestamp.FromTime(now), 1), "new_label", "foo"),
+		addMetricLabels(
+			untypedFromTriplet("metric_b", timestamp.FromTime(now), 2), "new_label", "foo"),
+	}
+	if !reflect.DeepEqual(want, result) {
+		t.Fatalf("Appended samples not as expected. Wanted: %+v Got: %+v", want, app.result)
+	}
+}
+
+func TestScrapeLoopMutatorDeletesMetric(t *testing.T) {
+	app := &collectResultAppender{}
+
+	sl := newScrapeLoop(context.Background(),
+		nil, nil, nil,
+		func(lset labels.Labels) labels.Labels {
+			var lb labels.Labels
+			for _, label := range lset {
+				if label.Name == "delete" {
+					if label.Value == "label" {
+						// delete this label
+						continue
+					} else if label.Value == "metric" {
+						// delete whole metric
+						return nil
+					}
+				}
+				lb = append(lb, label)
+			}
+			return lb
+		},
+		nopMutator,
+		func() Appender { return app },
+	)
+
+	now := time.Now()
+	_, _, err := sl.append([]byte(
+		"metric_a{delete=\"metric\"} 1\n"+
+			"metric_b{keep=\"x\"} 2\n"+
+			"metric_b{delete=\"label\",keep=\"y\"} 3\n"), now)
+	if err != nil {
+		t.Fatalf("Unexpected append error: %s", err)
+	}
+	// DeepEqual will report NaNs as being different, so replace with a different value.
+	result := app.Sorted()
+	want := []*dto.MetricFamily{
+		&dto.MetricFamily{
+			Name: proto.String("metric_b"),
+			Type: dto.MetricType_UNTYPED.Enum(),
+			Metric: []*dto.Metric{
+				&dto.Metric{
+					Untyped: &dto.Untyped{
+						Value: proto.Float64(2),
+					},
+					TimestampMs: proto.Int64(timestamp.FromTime(now)),
+					Label: []*dto.LabelPair{
+						{
+							Name:  proto.String("keep"),
+							Value: proto.String("x"),
+						},
+					},
+				},
+				&dto.Metric{
+					Untyped: &dto.Untyped{
+						Value: proto.Float64(3),
+					},
+					TimestampMs: proto.Int64(timestamp.FromTime(now)),
+					Label: []*dto.LabelPair{
+						{
+							Name:  proto.String("keep"),
+							Value: proto.String("y"),
+						},
+					},
+				},
+			},
+		},
+	}
+	if !reflect.DeepEqual(want, result) {
+		t.Fatalf("Appended samples not as expected. Wanted: %+v Got: %+v", want, app.result)
+	}
+}
+
 func TestScrapeLoopAppendSampleLimit(t *testing.T) {
 	resApp := &collectResultAppender{}
 	app := &limitAppender{Appender: resApp, limit: 1}
@@ -881,4 +984,14 @@ func untypedFromTriplet(name string, t int64, v float64) *dto.MetricFamily {
 			},
 		},
 	}
+}
+
+func addMetricLabels(metricFamily *dto.MetricFamily, labelName, labelValue string) *dto.MetricFamily {
+	for _, metric := range metricFamily.Metric {
+		metric.Label = append(metric.Label, &dto.LabelPair{
+			Name:  proto.String(labelName),
+			Value: proto.String(labelValue),
+		})
+	}
+	return metricFamily
 }

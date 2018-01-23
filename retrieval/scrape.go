@@ -637,26 +637,32 @@ func (sl *scrapeLoop) append(b []byte, ts time.Time) (total, added int, err erro
 loop:
 	for name, metricFamily := range metricFamilies {
 		total++
+		metrics := []*dto.Metric{}
 		for _, metric := range metricFamily.Metric {
 			if metric.TimestampMs == nil {
 				metric.TimestampMs = proto.Int64(defTime)
 			}
 			// TODO(jkohen): Here is where we would make a guess at reset timestamp.
 
-			// TODO(jkohen): Make the block below modify the metric and, in case of drop, the metric list.
 			var lset labels.Labels
 			labelPairsToLabels(metric.Label, &lset)
 
 			// Add target labels and relabeling and store the final label
 			// set.
 			lset = sl.sampleMutator(lset)
-
 			// The label set may be set to nil to indicate dropping.
 			if lset == nil {
 				continue
 			}
-		}
 
+			metric.Label = labelsToLabelPairs(lset)
+			metrics = append(metrics, metric)
+		}
+		// Drop family if we dropped all metrics.
+		if len(metrics) == 0 {
+			continue
+		}
+		metricFamily.Metric = metrics
 		err = app.Add(metricFamily)
 		switch err {
 		case nil:
@@ -751,7 +757,7 @@ func (sl *scrapeLoop) addReportSample(app Appender, name string, t int64, v floa
 
 	lset = sl.reportSampleMutator(lset)
 
-	// TODO(jkohen): Make the block below modify the metric and, in case of drop, the metric list. Or drop the report sample mutator, since it can only affect the metric name and it seems of limited value.
+	// TODO(jkohen): reportSampleMutator calls mutateReportSampleLabels, which returns the metric name and the target labels, so we could simplify the code to do just that.
 
 	metricFamily := &dto.MetricFamily{
 		Name: proto.String(name),
@@ -762,6 +768,7 @@ func (sl *scrapeLoop) addReportSample(app Appender, name string, t int64, v floa
 					Value: proto.Float64(v),
 				},
 				TimestampMs: proto.Int64(t),
+				Label:       labelsToLabelPairs(lset),
 			},
 		},
 	}
@@ -784,4 +791,15 @@ func labelPairsToLabels(input []*dto.LabelPair, output *labels.Labels) {
 			Value: label.GetValue(),
 		})
 	}
+}
+
+func labelsToLabelPairs(lset labels.Labels) []*dto.LabelPair {
+	var labelPairs []*dto.LabelPair
+	for _, label := range lset {
+		labelPairs = append(labelPairs, &dto.LabelPair{
+			Name:  proto.String(label.Name),
+			Value: proto.String(label.Value),
+		})
+	}
+	return labelPairs
 }
