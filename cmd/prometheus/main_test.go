@@ -22,8 +22,6 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
-
-	"github.com/prometheus/prometheus/util/testutil"
 )
 
 var promPath string
@@ -83,7 +81,7 @@ func TestStartupInterrupt(t *testing.T) {
 Loop:
 	for x := 0; x < 10; x++ {
 		// error=nil means prometheus has started so can send the interrupt signal and wait for the grace shutdown.
-		if _, err := http.Get("http://localhost:9090/graph"); err == nil {
+		if _, err := http.Get("http://localhost:9090/metrics"); err == nil {
 			startedOk = true
 			prom.Process.Signal(os.Interrupt)
 			select {
@@ -104,54 +102,5 @@ Loop:
 		t.Errorf("prometheus didn't shutdown gracefully after sending the Interrupt signal")
 	} else if stoppedErr != nil && stoppedErr.Error() != "signal: interrupt" { // TODO - find a better way to detect when the process didn't exit as expected!
 		t.Errorf("prometheus exited with an unexpected error:%v", stoppedErr)
-	}
-}
-
-func TestComputeExternalURL(t *testing.T) {
-	tests := []struct {
-		input string
-		valid bool
-	}{
-		{
-			input: "",
-			valid: true,
-		},
-		{
-			input: "http://proxy.com/prometheus",
-			valid: true,
-		},
-		{
-			input: "'https://url/prometheus'",
-			valid: false,
-		},
-		{
-			input: "'relative/path/with/quotes'",
-			valid: false,
-		},
-		{
-			input: "http://alertmanager.company.com",
-			valid: true,
-		},
-		{
-			input: "https://double--dash.de",
-			valid: true,
-		},
-		{
-			input: "'http://starts/with/quote",
-			valid: false,
-		},
-		{
-			input: "ends/with/quote\"",
-			valid: false,
-		},
-	}
-
-	for _, test := range tests {
-		_, err := computeExternalURL(test.input, "0.0.0.0:9090")
-		if test.valid {
-			testutil.Ok(t, err)
-		} else {
-			testutil.NotOk(t, err, "input=%q", test.input)
-		}
 	}
 }

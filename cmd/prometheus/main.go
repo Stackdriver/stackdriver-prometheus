@@ -17,15 +17,12 @@ package main
 import (
 	"context"
 	"fmt"
-	"net"
 	"net/http"
 	_ "net/http/pprof" // Comment this line to disable pprof endpoint.
-	"net/url"
 	"os"
 	"os/signal"
 	"path/filepath"
 	"runtime"
-	"strings"
 	"syscall"
 	"time"
 
@@ -135,6 +132,10 @@ func main() {
 
 	prometheus.MustRegister(configSuccess)
 	prometheus.MustRegister(configSuccessTime)
+
+	// TODO(jkohen): Expose the /metrics endpoint, so main_test can detect
+	// that this server startup. We need this, because we don't support the
+	// Prometheus web interface.
 
 	// Start all components while we wait for TSDB to open but only load
 	// initial config and mark ourselves as ready after it completed.
@@ -302,42 +303,4 @@ func reloadConfig(filename string, logger log.Logger, rls ...func(*config.Config
 		return fmt.Errorf("one or more errors occurred while applying the new configuration (--config.file=%s)", filename)
 	}
 	return nil
-}
-
-func startsOrEndsWithQuote(s string) bool {
-	return strings.HasPrefix(s, "\"") || strings.HasPrefix(s, "'") ||
-		strings.HasSuffix(s, "\"") || strings.HasSuffix(s, "'")
-}
-
-// computeExternalURL computes a sanitized external URL from a raw input. It infers unset
-// URL parts from the OS and the given listen address.
-func computeExternalURL(u, listenAddr string) (*url.URL, error) {
-	if u == "" {
-		hostname, err := os.Hostname()
-		if err != nil {
-			return nil, err
-		}
-		_, port, err := net.SplitHostPort(listenAddr)
-		if err != nil {
-			return nil, err
-		}
-		u = fmt.Sprintf("http://%s:%s/", hostname, port)
-	}
-
-	if startsOrEndsWithQuote(u) {
-		return nil, fmt.Errorf("URL must not begin or end with quotes")
-	}
-
-	eu, err := url.Parse(u)
-	if err != nil {
-		return nil, err
-	}
-
-	ppref := strings.TrimRight(eu.Path, "/")
-	if ppref != "" && !strings.HasPrefix(ppref, "/") {
-		ppref = "/" + ppref
-	}
-	eu.Path = ppref
-
-	return eu, nil
 }
