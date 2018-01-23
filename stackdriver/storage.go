@@ -14,6 +14,7 @@
 package stackdriver
 
 import (
+	"fmt"
 	"sync"
 
 	"github.com/go-kit/kit/log"
@@ -65,6 +66,16 @@ func (s *Storage) Close() error {
 
 // ApplyConfig updates the state as the new config requires.
 func (s *Storage) ApplyConfig(conf *config.Config) error {
+	// TODO(jkohen): try extracting this from the credentials
+	var projectId string
+	if value, ok := conf.GlobalConfig.ExternalLabels[ProjectIdLabel]; !ok {
+		return fmt.Errorf(
+			"the Stackdriver remote writer requires an external label '%s' in its configuration, and it must contain a project id or number",
+			ProjectIdLabel)
+	} else {
+		projectId = string(value)
+	}
+
 	s.mtx.Lock()
 	defer s.mtx.Unlock()
 
@@ -75,9 +86,10 @@ func (s *Storage) ApplyConfig(conf *config.Config) error {
 	// as this can be quite disruptive.
 	for i, rwConf := range conf.RemoteWriteConfigs {
 		c, err := NewClient(i, &ClientConfig{
-			URL:              rwConf.URL,
-			Timeout:          rwConf.RemoteTimeout,
-			HTTPClientConfig: rwConf.HTTPClientConfig,
+			Logger:    s.logger,
+			ProjectId: projectId,
+			URL:       rwConf.URL,
+			Timeout:   rwConf.RemoteTimeout,
 		})
 		if err != nil {
 			return err

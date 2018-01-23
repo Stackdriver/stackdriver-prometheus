@@ -14,57 +14,55 @@
 package stackdriver
 
 import (
-	"bufio"
-	"bytes"
 	"context"
+	"errors"
 	"fmt"
-	"io"
-	"net/http"
+	"sync"
 	"time"
 
+	"golang.org/x/oauth2/google"
+
+	"google.golang.org/api/googleapi"
 	monitoring "google.golang.org/api/monitoring/v3"
 
-	"github.com/golang/snappy"
+	"github.com/go-kit/kit/log"
+	"github.com/go-kit/kit/log/level"
 	"github.com/prometheus/common/model"
-	"golang.org/x/net/context/ctxhttp"
 
 	config_util "github.com/prometheus/common/config"
-	"github.com/prometheus/prometheus/util/httputil"
 )
 
 const (
-	maxErrMsgLen = 256
 	// TODO(jkohen): Use a custom prefix specific to Prometheus.
-	metricsPrefix = "custom.googleapis.com"
+	metricsPrefix             = "custom.googleapis.com"
+	maxTimeseriesesPerRequest = 200
 )
 
 // Client allows reading and writing from/to a remote HTTP endpoint.
 type Client struct {
-	index   int // Used to differentiate clients in metrics.
-	url     *config_util.URL
-	client  *http.Client
-	timeout time.Duration
+	index     int // Used to differentiate clients in metrics.
+	logger    log.Logger
+	projectId string
+	url       *config_util.URL
+	timeout   time.Duration
 }
 
 // ClientConfig configures a Client.
 type ClientConfig struct {
-	URL              *config_util.URL
-	Timeout          model.Duration
-	HTTPClientConfig config_util.HTTPClientConfig
+	Logger    log.Logger
+	ProjectId string // The Stackdriver project id in "projects/name-or-number" format.
+	URL       *config_util.URL
+	Timeout   model.Duration
 }
 
 // NewClient creates a new Client.
 func NewClient(index int, conf *ClientConfig) (*Client, error) {
-	httpClient, err := httputil.NewClientFromConfig(conf.HTTPClientConfig, "remote_storage")
-	if err != nil {
-		return nil, err
-	}
-
 	return &Client{
-		index:   index,
-		url:     conf.URL,
-		client:  httpClient,
-		timeout: time.Duration(conf.Timeout),
+		index:     index,
+		logger:    conf.Logger,
+		projectId: conf.ProjectId,
+		url:       conf.URL,
+		timeout:   time.Duration(conf.Timeout),
 	}, nil
 }
 
@@ -74,46 +72,58 @@ type recoverableError struct {
 
 // Store sends a batch of samples to the HTTP endpoint.
 func (c *Client) Store(req *monitoring.CreateTimeSeriesRequest) error {
-	// TODO(jkohen): Change to use prometheus-to-sd based code.
-	data, err := req.MarshalJSON()
-	if err != nil {
-		return err
+	tss := req.TimeSeries
+	if len(tss) == 0 {
+		return errors.New("received empty request")
 	}
-
-	compressed := snappy.Encode(nil, data)
-	httpReq, err := http.NewRequest("POST", c.url.String(), bytes.NewReader(compressed))
-	if err != nil {
-		// Errors from NewRequest are from unparseable URLs, so are not
-		// recoverable.
-		return err
-	}
-	httpReq.Header.Add("Content-Encoding", "snappy")
-	httpReq.Header.Set("Content-Type", "application/x-protobuf")
-	httpReq.Header.Set("X-Prometheus-Remote-Write-Version", "0.1.0")
 
 	ctx, cancel := context.WithTimeout(context.Background(), c.timeout)
 	defer cancel()
 
-	httpResp, err := ctxhttp.Do(ctx, c.client, httpReq)
+	client, err := google.DefaultClient(ctx, monitoring.MonitoringWriteScope)
 	if err != nil {
-		// Errors from client.Do are from (for example) network errors, so are
-		// recoverable.
-		return recoverableError{err}
+		return err
 	}
-	defer httpResp.Body.Close()
+	service, err := monitoring.New(client)
+	service.BasePath = c.url.String()
+	if err != nil {
+		return err
+	}
 
-	if httpResp.StatusCode/100 != 2 {
-		scanner := bufio.NewScanner(io.LimitReader(httpResp.Body, maxErrMsgLen))
-		line := ""
-		if scanner.Scan() {
-			line = scanner.Text()
+	errors := make(chan error, len(tss)/maxTimeseriesesPerRequest+1)
+	var wg sync.WaitGroup
+	for i := 0; i < len(tss); i += maxTimeseriesesPerRequest {
+		end := i + maxTimeseriesesPerRequest
+		if end > len(tss) {
+			end = len(tss)
 		}
-		err = fmt.Errorf("server returned HTTP status %s: %s", httpResp.Status, line)
+		wg.Add(1)
+		go func(begin int, end int) {
+			defer wg.Done()
+			req_copy := &monitoring.CreateTimeSeriesRequest{
+				TimeSeries: req.TimeSeries[begin:end],
+			}
+			_, err := service.Projects.TimeSeries.Create(c.projectId, req_copy).Context(ctx).Do()
+			if err != nil {
+				gerr, ok := err.(*googleapi.Error)
+				if !ok {
+					level.Warn(c.logger).Log("msg", "Unexpected error message type from Monitoring API", "err", err)
+					errors <- err
+				}
+				if gerr.Code/100 == 5 {
+					errors <- recoverableError{err}
+				} else {
+					errors <- err
+				}
+			}
+		}(i, end)
 	}
-	if httpResp.StatusCode/100 == 5 {
-		return recoverableError{err}
+	wg.Wait()
+	close(errors)
+	if err, ok := <-errors; ok {
+		return err
 	}
-	return err
+	return nil
 }
 
 // Name identifies the client.

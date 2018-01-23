@@ -15,70 +15,120 @@ package stackdriver
 
 import (
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
-	"reflect"
 	"strings"
 	"testing"
 	"time"
 
+	"google.golang.org/api/googleapi"
 	monitoring "google.golang.org/api/monitoring/v3"
 
 	config_util "github.com/prometheus/common/config"
 	"github.com/prometheus/common/model"
 )
 
-var longErrMessage = strings.Repeat("error message", maxErrMsgLen)
+var longErrMessage = strings.Repeat("[error message]", 10)
 
-func TestStoreHTTPErrorHandling(t *testing.T) {
+func TestStoreErrorHandling(t *testing.T) {
 	tests := []struct {
-		code int
-		err  error
+		code        int
+		err         error //*googleapi.Error
+		recoverable bool
 	}{
 		{
 			code: 200,
 			err:  nil,
 		},
 		{
-			code: 300,
-			err:  fmt.Errorf("server returned HTTP status 300 Multiple Choices: " + longErrMessage[:maxErrMsgLen]),
-		},
-		{
 			code: 404,
-			err:  fmt.Errorf("server returned HTTP status 404 Not Found: " + longErrMessage[:maxErrMsgLen]),
+			err: &googleapi.Error{
+				Code: 404,
+				Body: longErrMessage,
+			},
+			recoverable: false,
 		},
 		{
 			code: 500,
-			err:  recoverableError{fmt.Errorf("server returned HTTP status 500 Internal Server Error: " + longErrMessage[:maxErrMsgLen])},
+			err: &googleapi.Error{
+				Code: 500,
+				Body: longErrMessage,
+			},
+			recoverable: true,
 		},
 	}
 
 	for i, test := range tests {
-		server := httptest.NewServer(
-			http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				http.Error(w, longErrMessage, test.code)
-			}),
-		)
+		t.Run(fmt.Sprintf("%d", i), func(t *testing.T) {
+			server := httptest.NewServer(
+				http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					if test.err == nil {
+						w.WriteHeader(http.StatusOK)
+						io.WriteString(w, "{}")
+					} else {
+						// This isn't exactly how the Monitoring API encodes errors, but it works well enough for testing.
+						http.Error(w, longErrMessage, test.code)
+					}
+				}),
+			)
 
-		serverURL, err := url.Parse(server.URL)
-		if err != nil {
-			t.Fatal(err)
-		}
+			serverURL, err := url.Parse(server.URL)
+			if err != nil {
+				t.Fatal(err)
+			}
 
-		c, err := NewClient(0, &ClientConfig{
-			URL:     &config_util.URL{URL: serverURL},
-			Timeout: model.Duration(time.Second),
+			c, err := NewClient(0, &ClientConfig{
+				URL:     &config_util.URL{URL: serverURL},
+				Timeout: model.Duration(time.Second),
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			err = c.Store(&monitoring.CreateTimeSeriesRequest{
+				TimeSeries: []*monitoring.TimeSeries{
+					&monitoring.TimeSeries{},
+				},
+			})
+			if test.err != nil {
+				rerr, recoverable := err.(recoverableError)
+				if recoverable != test.recoverable {
+					if test.recoverable {
+						t.Errorf("expected recoverableError in error %v", err)
+					} else {
+						t.Errorf("unexpected recoverableError in error %v", err)
+					}
+				}
+				if recoverable {
+					err = rerr.error
+				}
+				gerr := err.(*googleapi.Error)
+				if gerr.Code != test.code {
+					t.Errorf("expected code %d in error %v", test.code, gerr)
+				}
+				if gerr.Body != longErrMessage+"\n" {
+					t.Errorf("expected message %v in error %v", longErrMessage, gerr)
+				}
+			}
+
+			server.Close()
 		})
-		if err != nil {
-			t.Fatal(err)
-		}
+	}
+}
 
-		err = c.Store(&monitoring.CreateTimeSeriesRequest{})
-		if !reflect.DeepEqual(err, test.err) {
-			t.Errorf("%d. Unexpected error; want %v, got %v", i, test.err, err)
-		}
+func TestEmptyRequest(t *testing.T) {
+	c, err := NewClient(0, &ClientConfig{
+		Timeout: model.Duration(time.Second),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
 
-		server.Close()
+	expected_error := "received empty request"
+	err = c.Store(&monitoring.CreateTimeSeriesRequest{})
+	if err.Error() != expected_error {
+		t.Errorf("Unexpected error; want %v, got %v", expected_error, err)
 	}
 }

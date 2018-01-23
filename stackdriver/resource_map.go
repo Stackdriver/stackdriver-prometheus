@@ -20,13 +20,17 @@ import (
 	dto "github.com/prometheus/client_model/go"
 )
 
+const (
+	ProjectIdLabel = "_kubernetes_project_id_or_name"
+)
+
 // TODO(jkohen): ensure these are sorted from more specific to less specific.
 var DefaultResourceMappings = []ResourceMap{
 	{
 		// This is just for testing, until the Kubernetes resource types are public.
 		Type: "gke_container",
 		LabelMap: map[string]string{
-			"_kubernetes_project_id_or_name": "project_id",
+			ProjectIdLabel:                   "project_id",
 			"_kubernetes_location":           "zone",
 			"_kubernetes_cluster_name":       "cluster_name",
 			"_kubernetes_namespace":          "namespace_id",
@@ -38,7 +42,7 @@ var DefaultResourceMappings = []ResourceMap{
 	{
 		Type: "k8s_container",
 		LabelMap: map[string]string{
-			"_kubernetes_project_id_or_name": "project",
+			ProjectIdLabel:                   "project",
 			"_kubernetes_location":           "location",
 			"_kubernetes_cluster_name":       "cluster_name",
 			"_kubernetes_namespace":          "namespace_name",
@@ -50,27 +54,27 @@ var DefaultResourceMappings = []ResourceMap{
 	{
 		Type: "k8s_pod",
 		LabelMap: map[string]string{
-			"_kubernetes_project_id_or_name": "project",
-			"_kubernetes_location":           "location",
-			"_kubernetes_cluster_name":       "cluster_name",
-			"_kubernetes_namespace":          "namespace_name",
-			"_kubernetes_pod_name":           "pod_name",
-			"_kubernetes_pod_node_name":      "node_name",
+			ProjectIdLabel:              "project",
+			"_kubernetes_location":      "location",
+			"_kubernetes_cluster_name":  "cluster_name",
+			"_kubernetes_namespace":     "namespace_name",
+			"_kubernetes_pod_name":      "pod_name",
+			"_kubernetes_pod_node_name": "node_name",
 		},
 	},
 	{
 		Type: "k8s_node",
 		LabelMap: map[string]string{
-			"_kubernetes_project_id_or_name": "project",
-			"_kubernetes_location":           "location",
-			"_kubernetes_cluster_name":       "cluster_name",
-			"_kubernetes_node_name":          "node_name",
+			ProjectIdLabel:             "project",
+			"_kubernetes_location":     "location",
+			"_kubernetes_cluster_name": "cluster_name",
+			"_kubernetes_node_name":    "node_name",
 		},
 	},
 	{
 		Type: "global",
 		LabelMap: map[string]string{
-			"_kubernetes_project_id_or_name": "project_id",
+			ProjectIdLabel: "project_id",
 		},
 	},
 }
