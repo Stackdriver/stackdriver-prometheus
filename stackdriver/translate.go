@@ -146,7 +146,6 @@ func (t *Translator) translateOne(name string,
 	start time.Time) (*monitoring.TimeSeries, error) {
 	monitoredResource := t.getMonitoredResource(metric)
 	if monitoredResource == nil {
-		// TODO(jkohen): test this,
 		return nil,
 			fmt.Errorf("cannot extract Stackdriver monitored resource from metric %v of family %s", metric, name)
 	}

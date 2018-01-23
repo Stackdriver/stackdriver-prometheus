@@ -19,6 +19,7 @@ package stackdriver
 import (
 	"bytes"
 	"math"
+	"strings"
 	"testing"
 	"time"
 
@@ -250,6 +251,48 @@ func TestToCreateTimeSeriesRequest(t *testing.T) {
 	assert.Equal(t, int64(3), counts[1])
 	assert.Equal(t, int64(0), counts[2])
 	assert.Equal(t, int64(1), counts[3])
+}
+
+func TestUnknownMonitoredResource(t *testing.T) {
+	resourceMappings := []ResourceMap{
+		{
+			// Right now this must be gke_container. See TODO in translateFamily().
+			Type: "gke_container",
+			LabelMap: map[string]string{
+				"_kubernetes_label": "stackdriver_label",
+			},
+		},
+	}
+	metrics := []*dto.MetricFamily{
+		{
+			Name: &testMetricName,
+			Type: &metricTypeCounter,
+			Help: &testMetricDescription,
+			Metric: []*dto.Metric{
+				{
+					Label: []*dto.LabelPair{
+						{
+							Name:  stringPtr("labelName"),
+							Value: stringPtr("labelValue1"),
+						},
+					},
+					Counter: &dto.Counter{Value: floatPtr(42.0)},
+				},
+			},
+		},
+	}
+	sampleTime := time.Unix(1234, 567)
+
+	output := &bytes.Buffer{}
+	translator := NewTranslator(log.NewLogfmtLogger(output),
+		clock.Clock(clock.NewFakeClock(sampleTime)), "metrics.prefix", resourceMappings)
+	request := translator.ToCreateTimeSeriesRequest(metrics)
+	if len(request.TimeSeries) > 0 {
+		t.Fatalf("expected empty request, but got %v", request)
+	}
+	if !strings.Contains(output.String(), "cannot extract Stackdriver monitored resource") {
+		t.Fatalf("missing \"cannot extract Stackdriver monitored resource\" from the output %v", output.String())
+	}
 }
 
 func floatPtr(val float64) *float64 {
