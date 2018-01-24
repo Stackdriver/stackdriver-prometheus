@@ -143,9 +143,6 @@ func main() {
 	prometheus.MustRegister(configSuccess)
 	prometheus.MustRegister(configSuccessTime)
 
-	// TODO(jkohen): Expose the /metrics endpoint, so main_test can detect
-	// that this server startup. We need this, because we don't support the
-	// Prometheus web interface.
 	http.Handle("/metrics", promhttp.Handler())
 
 	// Start all components while we wait for TSDB to open but only load
