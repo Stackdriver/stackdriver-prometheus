@@ -23,6 +23,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"runtime"
+	"sync"
 	"syscall"
 	"time"
 
@@ -44,6 +45,7 @@ import (
 	promlogflag "github.com/prometheus/common/promlog/flag"
 	"github.com/prometheus/prometheus/config"
 	"github.com/prometheus/prometheus/discovery"
+	sd_config "github.com/prometheus/prometheus/discovery/config"
 )
 
 var (
@@ -116,12 +118,9 @@ func main() {
 	level.Info(logger).Log("fd_limits", FdLimits())
 
 	var (
-		remoteStorage = stackdriver.NewStorage(log.With(logger, "component", "remote"))
-	)
-
-	var (
-		discoveryManager = discovery.NewManager(log.With(logger, "component", "discovery manager"))
-		scrapeManager    = retrieval.NewScrapeManager(log.With(logger, "component", "scrape manager"), remoteStorage)
+		remoteStorage          = stackdriver.NewStorage(log.With(logger, "component", "remote"))
+		discoveryManagerScrape = discovery.NewManager(log.With(logger, "component", "discovery manager scrape"))
+		scrapeManager          = retrieval.NewScrapeManager(log.With(logger, "component", "scrape manager"), remoteStorage)
 	)
 
 	// Monitor outgoing connections on default transport with conntrack.
@@ -131,8 +130,14 @@ func main() {
 
 	reloaders := []func(cfg *config.Config) error{
 		remoteStorage.ApplyConfig,
-		discoveryManager.ApplyConfig,
 		scrapeManager.ApplyConfig,
+		func(cfg *config.Config) error {
+			c := make(map[string]sd_config.ServiceDiscoveryConfig)
+			for _, v := range cfg.ScrapeConfigs {
+				c[v.JobName] = v.ServiceDiscoveryConfig
+			}
+			return discoveryManagerScrape.ApplyConfig(c)
+		},
 	}
 
 	prometheus.MustRegister(configSuccess)
@@ -146,8 +151,22 @@ func main() {
 	// Start all components while we wait for TSDB to open but only load
 	// initial config and mark ourselves as ready after it completed.
 	dbOpen := make(chan struct{})
-	// Wait until the server is ready to handle reloading
-	reloadReady := make(chan struct{})
+
+	// sync.Once is used to make sure we can close the channel at different execution stages(SIGTERM or when the config is loaded).
+	type closeOnce struct {
+		C     chan struct{}
+		once  sync.Once
+		Close func()
+	}
+	// Wait until the server is ready to handle reloading.
+	reloadReady := &closeOnce{
+		C: make(chan struct{}),
+	}
+	reloadReady.Close = func() {
+		reloadReady.once.Do(func() {
+			close(reloadReady.C)
+		})
+	}
 
 	var g group.Group
 	{
@@ -156,10 +175,13 @@ func main() {
 		cancel := make(chan struct{})
 		g.Add(
 			func() error {
+				// Don't forget to release the reloadReady channel so that waiting blocks can exit normally.
 				select {
 				case <-term:
 					level.Warn(logger).Log("msg", "Received SIGTERM, exiting gracefully...")
+					reloadReady.Close()
 				case <-cancel:
+					reloadReady.Close()
 					break
 				}
 				return nil
@@ -173,7 +195,7 @@ func main() {
 		ctxDiscovery, cancelDiscovery := context.WithCancel(context.Background())
 		g.Add(
 			func() error {
-				err := discoveryManager.Run(ctxDiscovery)
+				err := discoveryManagerScrape.Run(ctxDiscovery)
 				level.Info(logger).Log("msg", "Discovery manager stopped")
 				return err
 			},
@@ -186,7 +208,16 @@ func main() {
 	{
 		g.Add(
 			func() error {
-				err := scrapeManager.Run(discoveryManager.SyncCh())
+				// When the scrape manager receives a new targets list
+				// it needs to read a valid config for each job.
+				// It depends on the config being in sync with the discovery manager so
+				// we wait until the config is fully loaded.
+				select {
+				case <-reloadReady.C:
+					break
+				}
+
+				err := scrapeManager.Run(discoveryManagerScrape.SyncCh())
 				level.Info(logger).Log("msg", "Scrape manager stopped")
 				return err
 			},
@@ -207,11 +238,8 @@ func main() {
 		g.Add(
 			func() error {
 				select {
-				case <-reloadReady:
+				case <-reloadReady.C:
 					break
-				// In case a shutdown is initiated before the reloadReady is released.
-				case <-cancel:
-					return nil
 				}
 
 				for {
@@ -240,6 +268,7 @@ func main() {
 					break
 				// In case a shutdown is initiated before the dbOpen is released
 				case <-cancel:
+					reloadReady.Close()
 					return nil
 				}
 
@@ -247,7 +276,7 @@ func main() {
 					return fmt.Errorf("Error loading config %s", err)
 				}
 
-				close(reloadReady)
+				reloadReady.Close()
 				level.Info(logger).Log("msg", "Server is ready to receive requests.")
 				<-cancel
 				return nil
