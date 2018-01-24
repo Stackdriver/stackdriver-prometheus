@@ -145,10 +145,6 @@ func main() {
 
 	http.Handle("/metrics", promhttp.Handler())
 
-	// Start all components while we wait for TSDB to open but only load
-	// initial config and mark ourselves as ready after it completed.
-	dbOpen := make(chan struct{})
-
 	// sync.Once is used to make sure we can close the channel at different execution stages(SIGTERM or when the config is loaded).
 	type closeOnce struct {
 		C     chan struct{}
@@ -189,16 +185,16 @@ func main() {
 		)
 	}
 	{
-		ctxDiscovery, cancelDiscovery := context.WithCancel(context.Background())
+		ctx, cancel := context.WithCancel(context.Background())
 		g.Add(
 			func() error {
-				err := discoveryManagerScrape.Run(ctxDiscovery)
-				level.Info(logger).Log("msg", "Discovery manager stopped")
+				err := discoveryManagerScrape.Run(ctx)
+				level.Info(logger).Log("msg", "Scrape discovery manager stopped")
 				return err
 			},
 			func(err error) {
-				level.Info(logger).Log("msg", "Stopping discovery manager...")
-				cancelDiscovery()
+				level.Info(logger).Log("msg", "Stopping scrape discovery manager...")
+				cancel()
 			},
 		)
 	}
@@ -260,15 +256,6 @@ func main() {
 		cancel := make(chan struct{})
 		g.Add(
 			func() error {
-				select {
-				case <-dbOpen:
-					break
-				// In case a shutdown is initiated before the dbOpen is released
-				case <-cancel:
-					reloadReady.Close()
-					return nil
-				}
-
 				if err := reloadConfig(cfg.configFile, logger, reloaders...); err != nil {
 					return fmt.Errorf("Error loading config %s", err)
 				}
@@ -287,9 +274,13 @@ func main() {
 		cancel := make(chan struct{})
 		g.Add(
 			func() error {
+				select {
+				case <-reloadReady.C:
+					break
+				}
+
 				// Any Stackdriver client initialization goes here.
 				level.Info(logger).Log("msg", "Stackdriver client started")
-				close(dbOpen)
 				<-cancel
 				return nil
 			},
