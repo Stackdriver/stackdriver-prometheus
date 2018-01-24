@@ -248,9 +248,14 @@ func convertToDistributionValue(h *dto.Histogram) *monitoring.Distribution {
 	}
 }
 
+// getMetricLabels returns a Stackdriver label map from the label.
+// By convention it excludes any Prometheus labels with "_" prefix.
 func getMetricLabels(labels []*dto.LabelPair) map[string]string {
 	metricLabels := map[string]string{}
 	for _, label := range labels {
+		if strings.HasPrefix(string(label.GetName()), "_") {
+			continue
+		}
 		metricLabels[label.GetName()] = label.GetValue()
 	}
 	return metricLabels

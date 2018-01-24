@@ -295,6 +295,69 @@ func TestUnknownMonitoredResource(t *testing.T) {
 	}
 }
 
+func TestDropsInternalLabels(t *testing.T) {
+	metrics := []*dto.MetricFamily{
+		{
+			Name: &testMetricName,
+			Type: &metricTypeCounter,
+			Help: &testMetricDescription,
+			Metric: []*dto.Metric{
+				{
+					Label: []*dto.LabelPair{
+						{
+							Name:  stringPtr("keep"),
+							Value: stringPtr("x"),
+						},
+						{
+							Name:  stringPtr("_drop"),
+							Value: stringPtr("y"),
+						},
+					},
+					Counter: &dto.Counter{Value: floatPtr(42.0)},
+				},
+			},
+		},
+		{
+			Name: stringPtr(processStartTimeMetric),
+			Type: &metricTypeGauge,
+			Metric: []*dto.Metric{
+				{
+					Gauge: &dto.Gauge{Value: floatPtr(1234567890.0)},
+				},
+			},
+		},
+	}
+	sampleTime := time.Unix(1234, 567)
+
+	output := &bytes.Buffer{}
+	translator := NewTranslator(log.NewLogfmtLogger(output),
+		clock.Clock(clock.NewFakeClock(sampleTime)), "metrics.prefix", testResourceMappings)
+	request := translator.ToCreateTimeSeriesRequest(metrics)
+	if request == nil {
+		t.Fatalf("Failed with error %v", output.String())
+	} else if output.Len() > 0 {
+		t.Logf("succeeded with messages %v", output.String())
+	}
+
+	metric := request.TimeSeries[0]
+	assert.Equal(t, "metrics.prefix/test_name", metric.Metric.Type)
+	assert.Equal(t, "DOUBLE", metric.ValueType)
+	assert.Equal(t, "CUMULATIVE", metric.MetricKind)
+
+	assert.Equal(t, 1, len(metric.Points))
+	assert.Equal(t, "2009-02-13T23:31:30Z", metric.Points[0].Interval.StartTime)
+
+	labels := metric.Metric.Labels
+	assert.Equal(t, 1, len(labels))
+
+	if value, ok := labels["keep"]; !ok {
+		t.Errorf("Expected \"keep\" label, found %v", labels)
+	} else {
+		assert.Equal(t, "x", value)
+	}
+	assert.Equal(t, float64(42), *(metric.Points[0].Value.DoubleValue))
+}
+
 func floatPtr(val float64) *float64 {
 	ptr := val
 	return &ptr
