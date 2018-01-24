@@ -14,6 +14,7 @@
 package main
 
 import (
+	"bytes"
 	"flag"
 	"fmt"
 	"net/http"
@@ -26,7 +27,6 @@ import (
 
 var promPath string
 var promConfig = filepath.Join("..", "..", "documentation", "examples", "prometheus.yml")
-var promData = filepath.Join(os.TempDir(), "data")
 
 func TestMain(m *testing.M) {
 	flag.Parse()
@@ -53,7 +53,6 @@ func TestMain(m *testing.M) {
 
 	exitCode := m.Run()
 	os.Remove(promPath)
-	os.RemoveAll(promData)
 	os.Exit(exitCode)
 }
 
@@ -63,7 +62,10 @@ func TestStartupInterrupt(t *testing.T) {
 		t.Skip("skipping test in short mode.")
 	}
 
-	prom := exec.Command(promPath, "--config.file="+promConfig, "--storage.tsdb.path="+promData)
+	prom := exec.Command(promPath, "--config.file="+promConfig)
+	var bout, berr bytes.Buffer
+	prom.Stdout = &bout
+	prom.Stderr = &berr
 	err := prom.Start()
 	if err != nil {
 		t.Errorf("execution error: %v", err)
@@ -90,10 +92,18 @@ Loop:
 			case <-time.After(10 * time.Second):
 			}
 			break Loop
+		} else {
+			select {
+			case stoppedErr = <-done:
+				break Loop
+			default: // try again
+			}
 		}
 		time.Sleep(500 * time.Millisecond)
 	}
 
+	t.Logf("stodut: %v\n", bout.String())
+	t.Logf("stderr: %v\n", berr.String())
 	if !startedOk {
 		t.Errorf("prometheus didn't start in the specified timeout")
 		return

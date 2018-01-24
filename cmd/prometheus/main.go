@@ -34,6 +34,7 @@ import (
 	"github.com/oklog/oklog/pkg/group"
 	"github.com/pkg/errors"
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/prometheus/common/version"
 	k8s_runtime "k8s.io/apimachinery/pkg/util/runtime"
 
@@ -72,6 +73,7 @@ func main() {
 		configFile string
 
 		prometheusURL string
+		listenAddress string
 
 		logLevel promlog.AllowedLevel
 	}{}
@@ -84,6 +86,9 @@ func main() {
 
 	a.Flag("config.file", "Prometheus configuration file path.").
 		Default("prometheus.yml").StringVar(&cfg.configFile)
+
+	a.Flag("web.listen-address", "Address to listen on for UI, API, and telemetry.").
+		Default("0.0.0.0:9090").StringVar(&cfg.listenAddress)
 
 	promlogflag.AddFlags(a, &cfg.logLevel)
 
@@ -136,6 +141,7 @@ func main() {
 	// TODO(jkohen): Expose the /metrics endpoint, so main_test can detect
 	// that this server startup. We need this, because we don't support the
 	// Prometheus web interface.
+	http.Handle("/metrics", promhttp.Handler())
 
 	// Start all components while we wait for TSDB to open but only load
 	// initial config and mark ourselves as ready after it completed.
@@ -264,6 +270,29 @@ func main() {
 			func(err error) {
 				if err := remoteStorage.Close(); err != nil {
 					level.Error(logger).Log("msg", "Error stopping Stackdriver client", "err", err)
+				}
+				close(cancel)
+			},
+		)
+	}
+	{
+		cancel := make(chan struct{})
+		server := &http.Server{
+			Addr: cfg.listenAddress,
+		}
+		g.Add(
+			func() error {
+				level.Info(logger).Log("msg", "Web server started")
+				err := server.ListenAndServe()
+				if err != http.ErrServerClosed {
+					return err
+				}
+				<-cancel
+				return nil
+			},
+			func(err error) {
+				if err := server.Shutdown(context.Background()); err != nil {
+					level.Error(logger).Log("msg", "Error stopping web server", "err", err)
 				}
 				close(cancel)
 			},
