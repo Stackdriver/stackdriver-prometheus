@@ -75,7 +75,7 @@ func (s *Storage) ApplyConfig(conf *config.Config) error {
 			"the Stackdriver remote writer requires an external label '%s' in its configuration, and it must contain a project id or number",
 			ProjectIdLabel)
 	} else {
-		projectId = string(value)
+		projectId = fmt.Sprintf("projects/%v", value)
 	}
 
 	s.mtx.Lock()
