@@ -37,6 +37,8 @@ items:
         containers:
         - name: prometheus
           image: gcr.io/prometheus-to-sd/stackdriver-prometheus:master
+          # Helps during development, when reusing the tag.
+          imagePullPolicy: Always
           ports:
           - name: web
             containerPort: 9090
