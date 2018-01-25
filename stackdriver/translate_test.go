@@ -57,67 +57,67 @@ var metrics = []*dto.MetricFamily{
 			{
 				Label: []*dto.LabelPair{
 					{
-						Name:  stringPtr("labelName"),
-						Value: stringPtr("labelValue1"),
+						Name:  proto.String("labelName"),
+						Value: proto.String("labelValue1"),
 					},
 				},
-				Counter:     &dto.Counter{Value: floatPtr(42.0)},
+				Counter:     &dto.Counter{Value: proto.Float64(42.0)},
 				TimestampMs: proto.Int64(1234568000432),
 			},
 			{
 				Label: []*dto.LabelPair{
 					{
-						Name:  stringPtr("labelName"),
-						Value: stringPtr("labelValue2"),
+						Name:  proto.String("labelName"),
+						Value: proto.String("labelValue2"),
 					},
 				},
-				Counter:     &dto.Counter{Value: floatPtr(106.0)},
+				Counter:     &dto.Counter{Value: proto.Float64(106.0)},
 				TimestampMs: proto.Int64(1234568000432),
 			},
 		},
 	},
 	{
-		Name: stringPtr(gaugeMetricName),
+		Name: proto.String(gaugeMetricName),
 		Type: &metricTypeGauge,
 		Metric: []*dto.Metric{
 			{
 				Label: []*dto.LabelPair{
 					{
-						Name:  stringPtr("labelName"),
-						Value: stringPtr("falseValue"),
+						Name:  proto.String("labelName"),
+						Value: proto.String("falseValue"),
 					},
 				},
-				Gauge:       &dto.Gauge{Value: floatPtr(0.00001)},
+				Gauge:       &dto.Gauge{Value: proto.Float64(0.00001)},
 				TimestampMs: proto.Int64(1234568000432),
 			},
 			{
 				Label: []*dto.LabelPair{
 					{
-						Name:  stringPtr("labelName"),
-						Value: stringPtr("trueValue"),
+						Name:  proto.String("labelName"),
+						Value: proto.String("trueValue"),
 					},
 				},
-				Gauge:       &dto.Gauge{Value: floatPtr(1.2)},
+				Gauge:       &dto.Gauge{Value: proto.Float64(1.2)},
 				TimestampMs: proto.Int64(1234568000432),
 			},
 		},
 	},
 	{
-		Name: stringPtr(floatMetricName),
+		Name: proto.String(floatMetricName),
 		Type: &metricTypeCounter,
 		Metric: []*dto.Metric{
 			{
-				Counter:     &dto.Counter{Value: floatPtr(123.17)},
+				Counter:     &dto.Counter{Value: proto.Float64(123.17)},
 				TimestampMs: proto.Int64(1234568000432),
 			},
 		},
 	},
 	{
-		Name: stringPtr(processStartTimeMetric),
+		Name: proto.String(processStartTimeMetric),
 		Type: &metricTypeGauge,
 		Metric: []*dto.Metric{
 			{
-				Gauge:       &dto.Gauge{Value: floatPtr(1234567890.4321)},
+				Gauge:       &dto.Gauge{Value: proto.Float64(1234567890.4321)},
 				TimestampMs: proto.Int64(1234568000432),
 			},
 		},
@@ -129,24 +129,24 @@ var metrics = []*dto.MetricFamily{
 		Metric: []*dto.Metric{
 			{
 				Histogram: &dto.Histogram{
-					SampleCount: intPtr(5),
-					SampleSum:   floatPtr(13),
+					SampleCount: proto.Uint64(5),
+					SampleSum:   proto.Float64(13),
 					Bucket: []*dto.Bucket{
 						{
-							CumulativeCount: intPtr(1),
-							UpperBound:      floatPtr(1),
+							CumulativeCount: proto.Uint64(1),
+							UpperBound:      proto.Float64(1),
 						},
 						{
-							CumulativeCount: intPtr(4),
-							UpperBound:      floatPtr(3),
+							CumulativeCount: proto.Uint64(4),
+							UpperBound:      proto.Float64(3),
 						},
 						{
-							CumulativeCount: intPtr(4),
-							UpperBound:      floatPtr(5),
+							CumulativeCount: proto.Uint64(4),
+							UpperBound:      proto.Float64(5),
 						},
 						{
-							CumulativeCount: intPtr(5),
-							UpperBound:      floatPtr(math.Inf(1)),
+							CumulativeCount: proto.Uint64(5),
+							UpperBound:      proto.Float64(math.Inf(1)),
 						},
 					},
 				},
@@ -280,11 +280,11 @@ func TestUnknownMonitoredResource(t *testing.T) {
 				{
 					Label: []*dto.LabelPair{
 						{
-							Name:  stringPtr("labelName"),
-							Value: stringPtr("labelValue1"),
+							Name:  proto.String("labelName"),
+							Value: proto.String("labelValue1"),
 						},
 					},
-					Counter:     &dto.Counter{Value: floatPtr(42.0)},
+					Counter:     &dto.Counter{Value: proto.Float64(42.0)},
 					TimestampMs: proto.Int64(1234568000432),
 				},
 			},
@@ -312,25 +312,25 @@ func TestDropsInternalLabels(t *testing.T) {
 				{
 					Label: []*dto.LabelPair{
 						{
-							Name:  stringPtr("keep"),
-							Value: stringPtr("x"),
+							Name:  proto.String("keep"),
+							Value: proto.String("x"),
 						},
 						{
-							Name:  stringPtr("_drop"),
-							Value: stringPtr("y"),
+							Name:  proto.String("_drop"),
+							Value: proto.String("y"),
 						},
 					},
-					Counter:     &dto.Counter{Value: floatPtr(42.0)},
+					Counter:     &dto.Counter{Value: proto.Float64(42.0)},
 					TimestampMs: proto.Int64(1234568000432),
 				},
 			},
 		},
 		{
-			Name: stringPtr(processStartTimeMetric),
+			Name: proto.String(processStartTimeMetric),
 			Type: &metricTypeGauge,
 			Metric: []*dto.Metric{
 				{
-					Gauge:       &dto.Gauge{Value: floatPtr(1234567890.4321)},
+					Gauge:       &dto.Gauge{Value: proto.Float64(1234567890.4321)},
 					TimestampMs: proto.Int64(1234568000432),
 				},
 			},
@@ -363,19 +363,4 @@ func TestDropsInternalLabels(t *testing.T) {
 		assert.Equal(t, "x", value)
 	}
 	assert.Equal(t, float64(42), *(metric.Points[0].Value.DoubleValue))
-}
-
-func floatPtr(val float64) *float64 {
-	ptr := val
-	return &ptr
-}
-
-func intPtr(val uint64) *uint64 {
-	ptr := val
-	return &ptr
-}
-
-func stringPtr(val string) *string {
-	ptr := val
-	return &ptr
 }

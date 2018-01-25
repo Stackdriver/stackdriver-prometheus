@@ -294,8 +294,8 @@ func sampleToMetricFamily(s sample) *dto.MetricFamily {
 			&dto.Metric{
 				Label: []*dto.LabelPair{
 					{
-						Name:  stringPtr("_kubernetes_project_id_or_name"),
-						Value: stringPtr("1234567890"),
+						Name:  proto.String("_kubernetes_project_id_or_name"),
+						Value: proto.String("1234567890"),
 					},
 				},
 				Gauge: &dto.Gauge{
