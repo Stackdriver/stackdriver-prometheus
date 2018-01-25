@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/gogo/protobuf/proto"
+	"github.com/jkohen/prometheus/retrieval"
 	dto "github.com/prometheus/client_model/go"
 	"github.com/prometheus/prometheus/config"
 	monitoring "google.golang.org/api/monitoring/v3"
@@ -170,11 +171,16 @@ func TestStoreEmptyRequest(t *testing.T) {
 
 	// These should be received by the client.
 	for _, s := range samples {
-		m.Append(&dto.MetricFamily{
-			Name: proto.String(s.Name),
-			Type: dto.MetricType_UNTYPED.Enum(),
-			Metric: []*dto.Metric{
-				&dto.Metric{},
+		m.Append(&retrieval.MetricFamily{
+			MetricFamily: &dto.MetricFamily{
+				Name: proto.String(s.Name),
+				Type: dto.MetricType_UNTYPED.Enum(),
+				Metric: []*dto.Metric{
+					&dto.Metric{},
+				},
+			},
+			MetricResetTimestampMs: []*int64{
+				proto.Int64(1234567890000),
 			},
 		})
 	}
@@ -286,22 +292,27 @@ func TestSpawnNotMoreThanMaxConcurrentSendsGoroutines(t *testing.T) {
 	}
 }
 
-func sampleToMetricFamily(s sample) *dto.MetricFamily {
-	return &dto.MetricFamily{
-		Name: proto.String(s.Name),
-		Type: dto.MetricType_GAUGE.Enum(),
-		Metric: []*dto.Metric{
-			&dto.Metric{
-				Label: []*dto.LabelPair{
-					{
-						Name:  proto.String("_kubernetes_project_id_or_name"),
-						Value: proto.String("1234567890"),
+func sampleToMetricFamily(s sample) *retrieval.MetricFamily {
+	return &retrieval.MetricFamily{
+		MetricFamily: &dto.MetricFamily{
+			Name: proto.String(s.Name),
+			Type: dto.MetricType_GAUGE.Enum(),
+			Metric: []*dto.Metric{
+				&dto.Metric{
+					Label: []*dto.LabelPair{
+						{
+							Name:  proto.String("_kubernetes_project_id_or_name"),
+							Value: proto.String("1234567890"),
+						},
+					},
+					Gauge: &dto.Gauge{
+						Value: proto.Float64(s.Value),
 					},
 				},
-				Gauge: &dto.Gauge{
-					Value: proto.Float64(s.Value),
-				},
 			},
+		},
+		MetricResetTimestampMs: []*int64{
+			proto.Int64(1234567890000),
 		},
 	}
 }

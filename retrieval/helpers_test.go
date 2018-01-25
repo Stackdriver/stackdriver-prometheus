@@ -15,8 +15,6 @@ package retrieval
 
 import (
 	"sort"
-
-	dto "github.com/prometheus/client_model/go"
 )
 
 type nopAppendable struct{}
@@ -27,16 +25,16 @@ func (a nopAppendable) Appender() (Appender, error) {
 
 type nopAppender struct{}
 
-func (a nopAppender) Add(metricFamily *dto.MetricFamily) error { return nil }
+func (a nopAppender) Add(metricFamily *MetricFamily) error { return nil }
 
 // collectResultAppender records all samples that were added through the appender.
 // It can be used as its zero value or be backed by another appender it writes samples through.
 type collectResultAppender struct {
 	next   Appender
-	result []*dto.MetricFamily
+	result []*MetricFamily
 }
 
-func (a *collectResultAppender) Add(metricFamily *dto.MetricFamily) error {
+func (a *collectResultAppender) Add(metricFamily *MetricFamily) error {
 	a.result = append(a.result, metricFamily)
 	if a.next == nil {
 		return nil
@@ -44,17 +42,17 @@ func (a *collectResultAppender) Add(metricFamily *dto.MetricFamily) error {
 	return a.next.Add(metricFamily)
 }
 
-// ByName implements sort.Interface for []*dto.MetricFamily based on the Name
+// ByName implements sort.Interface for []*MetricFamily based on the Name
 // field.
-type ByName []*dto.MetricFamily
+type ByName []*MetricFamily
 
 func (f ByName) Len() int           { return len(f) }
 func (f ByName) Swap(i, j int)      { f[i], f[j] = f[j], f[i] }
 func (f ByName) Less(i, j int) bool { return f[i].GetName() < f[j].GetName() }
 
 // Sorted returns the collected samples in deterministic order, to help in tests.
-func (a *collectResultAppender) Sorted() []*dto.MetricFamily {
-	tmp := make([]*dto.MetricFamily, len(a.result))
+func (a *collectResultAppender) Sorted() []*MetricFamily {
+	tmp := make([]*MetricFamily, len(a.result))
 	copy(tmp, a.result)
 	sort.Sort(ByName(tmp))
 	return tmp

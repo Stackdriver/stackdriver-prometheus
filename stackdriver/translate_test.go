@@ -24,6 +24,7 @@ import (
 
 	"github.com/go-kit/kit/log"
 	"github.com/gogo/protobuf/proto"
+	"github.com/jkohen/prometheus/retrieval"
 	dto "github.com/prometheus/client_model/go"
 	"github.com/stretchr/testify/assert"
 )
@@ -48,110 +49,122 @@ var testResourceMappings = []ResourceMap{
 	},
 }
 
-var metrics = []*dto.MetricFamily{
+var metrics = []*retrieval.MetricFamily{
 	{
-		Name: &testMetricName,
-		Type: &metricTypeCounter,
-		Help: &testMetricDescription,
-		Metric: []*dto.Metric{
-			{
-				Label: []*dto.LabelPair{
-					{
-						Name:  proto.String("labelName"),
-						Value: proto.String("labelValue1"),
+		MetricFamily: &dto.MetricFamily{
+			Name: &testMetricName,
+			Type: &metricTypeCounter,
+			Help: &testMetricDescription,
+			Metric: []*dto.Metric{
+				{
+					Label: []*dto.LabelPair{
+						{
+							Name:  proto.String("labelName"),
+							Value: proto.String("labelValue1"),
+						},
 					},
+					Counter:     &dto.Counter{Value: proto.Float64(42.0)},
+					TimestampMs: proto.Int64(1234568000432),
 				},
-				Counter:     &dto.Counter{Value: proto.Float64(42.0)},
-				TimestampMs: proto.Int64(1234568000432),
-			},
-			{
-				Label: []*dto.LabelPair{
-					{
-						Name:  proto.String("labelName"),
-						Value: proto.String("labelValue2"),
+				{
+					Label: []*dto.LabelPair{
+						{
+							Name:  proto.String("labelName"),
+							Value: proto.String("labelValue2"),
+						},
 					},
+					Counter:     &dto.Counter{Value: proto.Float64(106.0)},
+					TimestampMs: proto.Int64(1234568000432),
 				},
-				Counter:     &dto.Counter{Value: proto.Float64(106.0)},
-				TimestampMs: proto.Int64(1234568000432),
 			},
+		},
+		MetricResetTimestampMs: []*int64{
+			proto.Int64(1234567890432),
+			proto.Int64(1234567890433),
 		},
 	},
 	{
-		Name: proto.String(gaugeMetricName),
-		Type: &metricTypeGauge,
-		Metric: []*dto.Metric{
-			{
-				Label: []*dto.LabelPair{
-					{
-						Name:  proto.String("labelName"),
-						Value: proto.String("falseValue"),
+		MetricFamily: &dto.MetricFamily{
+			Name: proto.String(gaugeMetricName),
+			Type: &metricTypeGauge,
+			Metric: []*dto.Metric{
+				{
+					Label: []*dto.LabelPair{
+						{
+							Name:  proto.String("labelName"),
+							Value: proto.String("falseValue"),
+						},
 					},
+					Gauge:       &dto.Gauge{Value: proto.Float64(0.00001)},
+					TimestampMs: proto.Int64(1234568000432),
 				},
-				Gauge:       &dto.Gauge{Value: proto.Float64(0.00001)},
-				TimestampMs: proto.Int64(1234568000432),
-			},
-			{
-				Label: []*dto.LabelPair{
-					{
-						Name:  proto.String("labelName"),
-						Value: proto.String("trueValue"),
+				{
+					Label: []*dto.LabelPair{
+						{
+							Name:  proto.String("labelName"),
+							Value: proto.String("trueValue"),
+						},
 					},
+					Gauge:       &dto.Gauge{Value: proto.Float64(1.2)},
+					TimestampMs: proto.Int64(1234568000432),
 				},
-				Gauge:       &dto.Gauge{Value: proto.Float64(1.2)},
-				TimestampMs: proto.Int64(1234568000432),
 			},
+		},
+		MetricResetTimestampMs: []*int64{
+			proto.Int64(1234567890432),
+			proto.Int64(1234567890432),
 		},
 	},
 	{
-		Name: proto.String(floatMetricName),
-		Type: &metricTypeCounter,
-		Metric: []*dto.Metric{
-			{
-				Counter:     &dto.Counter{Value: proto.Float64(123.17)},
-				TimestampMs: proto.Int64(1234568000432),
+		MetricFamily: &dto.MetricFamily{
+			Name: proto.String(floatMetricName),
+			Type: &metricTypeCounter,
+			Metric: []*dto.Metric{
+				{
+					Counter:     &dto.Counter{Value: proto.Float64(123.17)},
+					TimestampMs: proto.Int64(1234568000432),
+				},
 			},
+		},
+		MetricResetTimestampMs: []*int64{
+			proto.Int64(1234567890432),
 		},
 	},
 	{
-		Name: proto.String(processStartTimeMetric),
-		Type: &metricTypeGauge,
-		Metric: []*dto.Metric{
-			{
-				Gauge:       &dto.Gauge{Value: proto.Float64(1234567890.4321)},
-				TimestampMs: proto.Int64(1234568000432),
-			},
-		},
-	},
-	{
-		Name: &testMetricHistogram,
-		Type: &metricTypeHistogram,
-		Help: &testMetricHistogramDescription,
-		Metric: []*dto.Metric{
-			{
-				Histogram: &dto.Histogram{
-					SampleCount: proto.Uint64(5),
-					SampleSum:   proto.Float64(13),
-					Bucket: []*dto.Bucket{
-						{
-							CumulativeCount: proto.Uint64(1),
-							UpperBound:      proto.Float64(1),
-						},
-						{
-							CumulativeCount: proto.Uint64(4),
-							UpperBound:      proto.Float64(3),
-						},
-						{
-							CumulativeCount: proto.Uint64(4),
-							UpperBound:      proto.Float64(5),
-						},
-						{
-							CumulativeCount: proto.Uint64(5),
-							UpperBound:      proto.Float64(math.Inf(1)),
+		MetricFamily: &dto.MetricFamily{
+			Name: &testMetricHistogram,
+			Type: &metricTypeHistogram,
+			Help: &testMetricHistogramDescription,
+			Metric: []*dto.Metric{
+				{
+					Histogram: &dto.Histogram{
+						SampleCount: proto.Uint64(5),
+						SampleSum:   proto.Float64(13),
+						Bucket: []*dto.Bucket{
+							{
+								CumulativeCount: proto.Uint64(1),
+								UpperBound:      proto.Float64(1),
+							},
+							{
+								CumulativeCount: proto.Uint64(4),
+								UpperBound:      proto.Float64(3),
+							},
+							{
+								CumulativeCount: proto.Uint64(4),
+								UpperBound:      proto.Float64(5),
+							},
+							{
+								CumulativeCount: proto.Uint64(5),
+								UpperBound:      proto.Float64(math.Inf(1)),
+							},
 						},
 					},
+					TimestampMs: proto.Int64(1234568000432),
 				},
-				TimestampMs: proto.Int64(1234568000432),
 			},
+		},
+		MetricResetTimestampMs: []*int64{
+			proto.Int64(1234567890432),
 		},
 	},
 }
@@ -168,7 +181,7 @@ func TestToCreateTimeSeriesRequest(t *testing.T) {
 	}
 
 	ts := request.TimeSeries
-	assert.Equal(t, 7, len(ts))
+	assert.Equal(t, 6, len(ts))
 
 	// First two counter values.
 	for i := 0; i <= 1; i++ {
@@ -178,15 +191,16 @@ func TestToCreateTimeSeriesRequest(t *testing.T) {
 		assert.Equal(t, "CUMULATIVE", metric.MetricKind)
 
 		assert.Equal(t, 1, len(metric.Points))
-		assert.Equal(t, "2009-02-13T23:31:30.432100057Z", metric.Points[0].Interval.StartTime)
 		assert.Equal(t, "2009-02-13T23:33:20.432Z", metric.Points[0].Interval.EndTime)
 
 		labels := metric.Metric.Labels
 		assert.Equal(t, 1, len(labels))
 
 		if labels["labelName"] == "labelValue1" {
+			assert.Equal(t, "2009-02-13T23:31:30.432Z", metric.Points[0].Interval.StartTime)
 			assert.Equal(t, float64(42), *(metric.Points[0].Value.DoubleValue))
 		} else if labels["labelName"] == "labelValue2" {
+			assert.Equal(t, "2009-02-13T23:31:30.433Z", metric.Points[0].Interval.StartTime)
 			assert.Equal(t, float64(106), *(metric.Points[0].Value.DoubleValue))
 		} else {
 			t.Errorf("Wrong label labelName value %s", labels["labelName"])
@@ -219,20 +233,11 @@ func TestToCreateTimeSeriesRequest(t *testing.T) {
 	assert.Equal(t, "CUMULATIVE", metric.MetricKind)
 	assert.InEpsilon(t, 123.17, *(metric.Points[0].Value.DoubleValue), epsilon)
 	assert.Equal(t, 1, len(metric.Points))
-	assert.Equal(t, "2009-02-13T23:31:30.432100057Z", metric.Points[0].Interval.StartTime)
-	assert.Equal(t, "2009-02-13T23:33:20.432Z", metric.Points[0].Interval.EndTime)
-
-	// Then a single gauge float value.
-	metric = ts[5]
-	assert.Equal(t, "metrics.prefix/process_start_time_seconds", metric.Metric.Type)
-	assert.Equal(t, "DOUBLE", metric.ValueType)
-	assert.Equal(t, "GAUGE", metric.MetricKind)
-	assert.Equal(t, 1, len(metric.Points))
-	assert.InEpsilon(t, 1234567890.4321, *(metric.Points[0].Value.DoubleValue), epsilon)
+	assert.Equal(t, "2009-02-13T23:31:30.432Z", metric.Points[0].Interval.StartTime)
 	assert.Equal(t, "2009-02-13T23:33:20.432Z", metric.Points[0].Interval.EndTime)
 
 	// Histogram
-	metric = ts[6]
+	metric = ts[5]
 	assert.Equal(t, "metrics.prefix/test_histogram", metric.Metric.Type)
 	assert.Equal(t, "DISTRIBUTION", metric.ValueType)
 	assert.Equal(t, "CUMULATIVE", metric.MetricKind)
@@ -271,22 +276,27 @@ func TestUnknownMonitoredResource(t *testing.T) {
 			},
 		},
 	}
-	metrics := []*dto.MetricFamily{
+	metrics := []*retrieval.MetricFamily{
 		{
-			Name: &testMetricName,
-			Type: &metricTypeCounter,
-			Help: &testMetricDescription,
-			Metric: []*dto.Metric{
-				{
-					Label: []*dto.LabelPair{
-						{
-							Name:  proto.String("labelName"),
-							Value: proto.String("labelValue1"),
+			MetricFamily: &dto.MetricFamily{
+				Name: &testMetricName,
+				Type: &metricTypeCounter,
+				Help: &testMetricDescription,
+				Metric: []*dto.Metric{
+					{
+						Label: []*dto.LabelPair{
+							{
+								Name:  proto.String("labelName"),
+								Value: proto.String("labelValue1"),
+							},
 						},
+						Counter:     &dto.Counter{Value: proto.Float64(42.0)},
+						TimestampMs: proto.Int64(1234568000432),
 					},
-					Counter:     &dto.Counter{Value: proto.Float64(42.0)},
-					TimestampMs: proto.Int64(1234568000432),
 				},
+			},
+			MetricResetTimestampMs: []*int64{
+				proto.Int64(1234567890432),
 			},
 		},
 	}
@@ -303,36 +313,31 @@ func TestUnknownMonitoredResource(t *testing.T) {
 }
 
 func TestDropsInternalLabels(t *testing.T) {
-	metrics := []*dto.MetricFamily{
+	metrics := []*retrieval.MetricFamily{
 		{
-			Name: &testMetricName,
-			Type: &metricTypeCounter,
-			Help: &testMetricDescription,
-			Metric: []*dto.Metric{
-				{
-					Label: []*dto.LabelPair{
-						{
-							Name:  proto.String("keep"),
-							Value: proto.String("x"),
+			MetricFamily: &dto.MetricFamily{
+				Name: &testMetricName,
+				Type: &metricTypeCounter,
+				Help: &testMetricDescription,
+				Metric: []*dto.Metric{
+					{
+						Label: []*dto.LabelPair{
+							{
+								Name:  proto.String("keep"),
+								Value: proto.String("x"),
+							},
+							{
+								Name:  proto.String("_drop"),
+								Value: proto.String("y"),
+							},
 						},
-						{
-							Name:  proto.String("_drop"),
-							Value: proto.String("y"),
-						},
+						Counter:     &dto.Counter{Value: proto.Float64(42.0)},
+						TimestampMs: proto.Int64(1234568000432),
 					},
-					Counter:     &dto.Counter{Value: proto.Float64(42.0)},
-					TimestampMs: proto.Int64(1234568000432),
 				},
 			},
-		},
-		{
-			Name: proto.String(processStartTimeMetric),
-			Type: &metricTypeGauge,
-			Metric: []*dto.Metric{
-				{
-					Gauge:       &dto.Gauge{Value: proto.Float64(1234567890.4321)},
-					TimestampMs: proto.Int64(1234568000432),
-				},
+			MetricResetTimestampMs: []*int64{
+				proto.Int64(1234567890432),
 			},
 		},
 	}
@@ -352,7 +357,7 @@ func TestDropsInternalLabels(t *testing.T) {
 	assert.Equal(t, "CUMULATIVE", metric.MetricKind)
 
 	assert.Equal(t, 1, len(metric.Points))
-	assert.Equal(t, "2009-02-13T23:31:30.432100057Z", metric.Points[0].Interval.StartTime)
+	assert.Equal(t, "2009-02-13T23:31:30.432Z", metric.Points[0].Interval.StartTime)
 
 	labels := metric.Metric.Labels
 	assert.Equal(t, 1, len(labels))

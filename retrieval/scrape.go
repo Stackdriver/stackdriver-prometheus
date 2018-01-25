@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"strings"
 	"sync"
@@ -132,7 +133,11 @@ type scrapePool struct {
 	newLoop func(*Target, scraper) loop
 }
 
-const maxAheadTime = 10 * time.Minute
+const (
+	maxAheadTime = 10 * time.Minute
+	// Built-in Prometheus metric exporting process start time.
+	processStartTimeMetricName = "process_start_time_seconds"
+)
 
 type labelsMutator func(labels.Labels) labels.Labels
 
@@ -636,16 +641,25 @@ func (sl *scrapeLoop) append(b []byte, ts time.Time) (total, added int, err erro
 		numOutOfBounds              = 0
 	)
 	var sampleLimitErr error
+	var resetTimeMs *int64
+
+	if resetTime, err := getResetTime(metricFamilies); err != nil {
+		level.Error(sl.l).Log("msg", "extract process start time", "err", err)
+		// Continue with the default resetTime.
+		resetTimeMs = proto.Int64(NoTimestamp)
+	} else {
+		resetTimeMs = proto.Int64(timestamp.FromTime(resetTime))
+	}
 
 loop:
 	for name, metricFamily := range metricFamilies {
 		total++
 		metrics := []*dto.Metric{}
+		resetTimes := []*int64{}
 		for _, metric := range metricFamily.Metric {
 			if metric.TimestampMs == nil {
 				metric.TimestampMs = proto.Int64(defTime)
 			}
-			// TODO(jkohen): Here is where we would make a guess at reset timestamp.
 
 			var lset labels.Labels
 			labelPairsToLabels(metric.Label, &lset)
@@ -660,13 +674,14 @@ loop:
 
 			metric.Label = labelsToLabelPairs(lset)
 			metrics = append(metrics, metric)
+			resetTimes = append(resetTimes, resetTimeMs)
 		}
 		// Drop family if we dropped all metrics.
 		if len(metrics) == 0 {
 			continue
 		}
 		metricFamily.Metric = metrics
-		err = app.Add(metricFamily)
+		err = app.Add(&MetricFamily{metricFamily, resetTimes})
 		switch err {
 		case nil:
 		case ErrOutOfOrderSample:
@@ -775,7 +790,7 @@ func (sl *scrapeLoop) addReportSample(app Appender, name string, t int64, v floa
 			},
 		},
 	}
-	err := app.Add(metricFamily)
+	err := app.Add(&MetricFamily{metricFamily, []*int64{proto.Int64(NoTimestamp)}})
 	switch err {
 	case nil:
 		return nil
@@ -805,4 +820,21 @@ func labelsToLabelPairs(lset labels.Labels) []*dto.LabelPair {
 		})
 	}
 	return labelPairs
+}
+
+func getResetTime(metrics map[string]*dto.MetricFamily) (time.Time, error) {
+	// For cumulative metrics we need to know process start time.
+	if family, ok := metrics[processStartTimeMetricName]; ok {
+		if family.GetType() == dto.MetricType_GAUGE &&
+			len(family.GetMetric()) == 1 {
+
+			value := family.Metric[0].Gauge.GetValue()
+			startSeconds := math.Trunc(value)
+			startNanos := 1000000000 * (value - startSeconds)
+			return time.Unix(int64(startSeconds), int64(startNanos)), nil
+		}
+	}
+	return time.Time{},
+		fmt.Errorf("metric %s invalid or not defined, cumulative will be inaccurate",
+			processStartTimeMetricName)
 }

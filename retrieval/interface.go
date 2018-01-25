@@ -29,6 +29,19 @@ var (
 	ErrOutOfBounds                 = errors.New("out of bounds")
 )
 
+const (
+	NoTimestamp = 0
+)
+
+type MetricFamily struct {
+	*dto.MetricFamily
+	// MetricResetTimestampMs must have one element for each
+	// MetricFamily.Metric. Elements must be initialized to NoTimestamp if
+	// the value is unknown.
+	// This is a *int64 to somewhat mimic the proto API used by dto.MetricFamily.
+	MetricResetTimestampMs []*int64
+}
+
 type Appender interface {
-	Add(metricFamily *dto.MetricFamily) error
+	Add(metricFamily *MetricFamily) error
 }

@@ -23,6 +23,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"reflect"
+	"sort"
 	"strings"
 	"sync"
 	"testing"
@@ -38,6 +39,27 @@ import (
 	"github.com/prometheus/prometheus/pkg/labels"
 	"github.com/prometheus/prometheus/pkg/timestamp"
 )
+
+const processStartTimeSecondsText = "# TYPE process_start_time_seconds gauge\n" +
+	"process_start_time_seconds 1234567890.4321 1234568000432\n"
+
+func makeProcessStartTimeMetric() *MetricFamily {
+	return &MetricFamily{
+		MetricFamily: &dto.MetricFamily{
+			Name: proto.String(processStartTimeMetricName),
+			Type: dto.MetricType_GAUGE.Enum(),
+			Metric: []*dto.Metric{
+				{
+					Gauge:       &dto.Gauge{Value: proto.Float64(1234567890.4321)},
+					TimestampMs: proto.Int64(1234568000432),
+				},
+			},
+		},
+		MetricResetTimestampMs: []*int64{
+			proto.Int64(1234567890432),
+		},
+	}
+}
 
 func TestNewScrapePool(t *testing.T) {
 	var (
@@ -478,19 +500,57 @@ func TestScrapeLoopAppend(t *testing.T) {
 	)
 
 	now := time.Now()
-	_, _, err := sl.append([]byte("metric_a 1\nmetric_b NaN\n"), now)
+	_, _, err := sl.append([]byte(
+		processStartTimeSecondsText+
+			"metric_a 1\n"+
+			"metric_b NaN\n"), now)
 	if err != nil {
 		t.Fatalf("Unexpected append error: %s", err)
 	}
 	// DeepEqual will report NaNs as being different, so replace with a different value.
 	result := app.Sorted()
 	result[1].Metric[0].Untyped.Value = proto.Float64(42)
-	want := []*dto.MetricFamily{
+	want := []*MetricFamily{
+		makeProcessStartTimeMetric(),
 		untypedFromTriplet("metric_a", timestamp.FromTime(now), 1),
 		untypedFromTriplet("metric_b", timestamp.FromTime(now), 42),
 	}
+	sort.Sort(ByName(want))
 	if !reflect.DeepEqual(want, result) {
-		t.Fatalf("Appended samples not as expected. Wanted: %+v Got: %+v", want, app.result)
+		t.Fatalf("Appended samples not as expected. Wanted: %+v Got: %+v", want, result)
+	}
+}
+
+func TestScrapeLoopAppendMissingProcessStartTime(t *testing.T) {
+	app := &collectResultAppender{}
+
+	sl := newScrapeLoop(context.Background(),
+		nil, nil, nil,
+		nopMutator,
+		nopMutator,
+		func() Appender { return app },
+	)
+
+	now := time.Now()
+	_, _, err := sl.append([]byte(
+		"metric_a 1\n"+
+			"metric_b 2\n"), now)
+	if err != nil {
+		t.Fatalf("Unexpected append error: %s", err)
+	}
+	want := []*MetricFamily{
+		untypedFromTriplet("metric_a", timestamp.FromTime(now), 1),
+		untypedFromTriplet("metric_b", timestamp.FromTime(now), 2),
+	}
+	// Unset the reset timestamp, because we don't pass processStartTimeMetricName in the input.
+	for _, family := range want {
+		for _, resetTimestampMs := range family.MetricResetTimestampMs {
+			*resetTimestampMs = NoTimestamp
+		}
+	}
+	sort.Sort(ByName(want))
+	if !reflect.DeepEqual(want, app.Sorted()) {
+		t.Fatalf("Appended samples not as expected. Wanted: %+v Got: %+v", want, app.Sorted())
 	}
 }
 
@@ -509,19 +569,24 @@ func TestScrapeLoopMutator(t *testing.T) {
 	)
 
 	now := time.Now()
-	_, _, err := sl.append([]byte("metric_a 1\nmetric_b 2\n"), now)
+	_, _, err := sl.append([]byte(
+		processStartTimeSecondsText+
+			"metric_a 1\n"+
+			"metric_b 2\n"), now)
 	if err != nil {
 		t.Fatalf("Unexpected append error: %s", err)
 	}
 	result := app.Sorted()
-	want := []*dto.MetricFamily{
+	want := []*MetricFamily{
+		addMetricLabels(makeProcessStartTimeMetric(), "new_label", "foo"),
 		addMetricLabels(
 			untypedFromTriplet("metric_a", timestamp.FromTime(now), 1), "new_label", "foo"),
 		addMetricLabels(
 			untypedFromTriplet("metric_b", timestamp.FromTime(now), 2), "new_label", "foo"),
 	}
+	sort.Sort(ByName(want))
 	if !reflect.DeepEqual(want, result) {
-		t.Fatalf("Appended samples not as expected. Wanted: %+v Got: %+v", want, app.result)
+		t.Fatalf("Appended samples not as expected. Wanted: %+v Got: %+v", want, result)
 	}
 }
 
@@ -552,7 +617,8 @@ func TestScrapeLoopMutatorDeletesMetric(t *testing.T) {
 
 	now := time.Now()
 	_, _, err := sl.append([]byte(
-		"metric_a{delete=\"metric\"} 1\n"+
+		processStartTimeSecondsText+
+			"metric_a{delete=\"metric\"} 1\n"+
 			"metric_b{keep=\"x\"} 2\n"+
 			"metric_b{delete=\"label\",keep=\"y\"} 3\n"), now)
 	if err != nil {
@@ -560,40 +626,47 @@ func TestScrapeLoopMutatorDeletesMetric(t *testing.T) {
 	}
 	// DeepEqual will report NaNs as being different, so replace with a different value.
 	result := app.Sorted()
-	want := []*dto.MetricFamily{
-		&dto.MetricFamily{
-			Name: proto.String("metric_b"),
-			Type: dto.MetricType_UNTYPED.Enum(),
-			Metric: []*dto.Metric{
-				&dto.Metric{
-					Untyped: &dto.Untyped{
-						Value: proto.Float64(2),
-					},
-					TimestampMs: proto.Int64(timestamp.FromTime(now)),
-					Label: []*dto.LabelPair{
-						{
-							Name:  proto.String("keep"),
-							Value: proto.String("x"),
+	want := []*MetricFamily{
+		{
+			MetricFamily: &dto.MetricFamily{
+				Name: proto.String("metric_b"),
+				Type: dto.MetricType_UNTYPED.Enum(),
+				Metric: []*dto.Metric{
+					&dto.Metric{
+						Untyped: &dto.Untyped{
+							Value: proto.Float64(2),
+						},
+						TimestampMs: proto.Int64(timestamp.FromTime(now)),
+						Label: []*dto.LabelPair{
+							{
+								Name:  proto.String("keep"),
+								Value: proto.String("x"),
+							},
 						},
 					},
-				},
-				&dto.Metric{
-					Untyped: &dto.Untyped{
-						Value: proto.Float64(3),
-					},
-					TimestampMs: proto.Int64(timestamp.FromTime(now)),
-					Label: []*dto.LabelPair{
-						{
-							Name:  proto.String("keep"),
-							Value: proto.String("y"),
+					&dto.Metric{
+						Untyped: &dto.Untyped{
+							Value: proto.Float64(3),
+						},
+						TimestampMs: proto.Int64(timestamp.FromTime(now)),
+						Label: []*dto.LabelPair{
+							{
+								Name:  proto.String("keep"),
+								Value: proto.String("y"),
+							},
 						},
 					},
 				},
 			},
+			MetricResetTimestampMs: []*int64{
+				proto.Int64(1234567890432),
+				proto.Int64(1234567890432),
+			},
 		},
 	}
+	sort.Sort(ByName(want))
 	if !reflect.DeepEqual(want, result) {
-		t.Fatalf("Appended samples not as expected. Wanted: %+v Got: %+v", want, app.result)
+		t.Fatalf("Appended samples not as expected. Wanted: %+v Got: %+v", want, result)
 	}
 }
 
@@ -617,7 +690,11 @@ func TestScrapeLoopAppendSampleLimit(t *testing.T) {
 	beforeMetricValue := beforeMetric.GetCounter().GetValue()
 
 	now := time.Now()
-	_, _, err = sl.append([]byte("metric_a 1\nmetric_b 1\nmetric_c 1\n"), now)
+	_, _, err = sl.append([]byte(
+		processStartTimeSecondsText+
+			"metric_a 1\n"+
+			"metric_b 1\n"+
+			"metric_c 1\n"), now)
 	if err != errSampleLimit {
 		t.Fatalf("Did not see expected sample limit error: %s", err)
 	}
@@ -652,7 +729,9 @@ func TestScrapeLoopAppendNoStalenessIfTimestamp(t *testing.T) {
 	)
 
 	now := time.Now()
-	_, _, err := sl.append([]byte("metric_a 1 1000\n"), now)
+	_, _, err := sl.append([]byte(
+		processStartTimeSecondsText+
+			"metric_a 1 1000\n"), now)
 	if err != nil {
 		t.Fatalf("Unexpected append error: %s", err)
 	}
@@ -661,11 +740,13 @@ func TestScrapeLoopAppendNoStalenessIfTimestamp(t *testing.T) {
 		t.Fatalf("Unexpected append error: %s", err)
 	}
 
-	want := []*dto.MetricFamily{
+	want := []*MetricFamily{
+		makeProcessStartTimeMetric(),
 		untypedFromTriplet("metric_a", 1000, 1),
 	}
+	sort.Sort(ByName(want))
 	if !reflect.DeepEqual(want, app.Sorted()) {
-		t.Fatalf("Appended samples not as expected. Wanted: %+v Got: %+v", want, app.result)
+		t.Fatalf("Appended samples not as expected. Wanted: %+v Got: %+v", want, app.Sorted())
 	}
 }
 
@@ -744,7 +825,7 @@ type errorAppender struct {
 	collectResultAppender
 }
 
-func (app *errorAppender) Add(metricFamily *dto.MetricFamily) error {
+func (app *errorAppender) Add(metricFamily *MetricFamily) error {
 	switch *metricFamily.Name {
 	case "out_of_order":
 		return ErrOutOfOrderSample
@@ -769,15 +850,22 @@ func TestScrapeLoopAppendGracefullyIfAmendOrOutOfOrderOrOutOfBounds(t *testing.T
 	)
 
 	now := time.Unix(1, 0)
-	_, _, err := sl.append([]byte("out_of_order 1\namend 1\nnormal 1\nout_of_bounds 1\n"), now)
+	_, _, err := sl.append([]byte(
+		processStartTimeSecondsText+
+			"out_of_order 1\n"+
+			"amend 1\n"+
+			"normal 1\n"+
+			"out_of_bounds 1\n"), now)
 	if err != nil {
 		t.Fatalf("Unexpected append error: %s", err)
 	}
-	want := []*dto.MetricFamily{
+	want := []*MetricFamily{
+		makeProcessStartTimeMetric(),
 		untypedFromTriplet("normal", timestamp.FromTime(now), 1),
 	}
+	sort.Sort(ByName(want))
 	if !reflect.DeepEqual(want, app.Sorted()) {
-		t.Fatalf("Appended samples not as expected. Wanted: %+v Got: %+v", want, app.result)
+		t.Fatalf("Appended samples not as expected. Wanted: %+v Got: %+v", want, app.Sorted())
 	}
 }
 
@@ -797,14 +885,16 @@ func TestScrapeLoopOutOfBoundsTimeError(t *testing.T) {
 	)
 
 	now := time.Now().Add(20 * time.Minute)
-	total, added, err := sl.append([]byte("normal 1\n"), now)
-	if total != 1 {
-		t.Error("expected 1 metric")
+	total, added, err := sl.append([]byte(
+		processStartTimeSecondsText+
+			"normal 1\n"), now)
+	if total != 2 {
+		t.Error("expected 2 metrics")
 		return
 	}
 
-	if added != 0 {
-		t.Error("no metric should be added")
+	if added != 1 {
+		t.Errorf("only metric %v should be added", processStartTimeMetricName)
 	}
 
 	if err != nil {
@@ -970,23 +1060,28 @@ func (ts *testScraper) scrape(ctx context.Context, w io.Writer) error {
 	return ts.scrapeErr
 }
 
-// untypedFromTriplet is a helper to adapt Prometheus unit tests to the new API based on dto.MetricFamily.
-func untypedFromTriplet(name string, t int64, v float64) *dto.MetricFamily {
-	return &dto.MetricFamily{
-		Name: proto.String(name),
-		Type: dto.MetricType_UNTYPED.Enum(),
-		Metric: []*dto.Metric{
-			&dto.Metric{
-				Untyped: &dto.Untyped{
-					Value: proto.Float64(v),
+// untypedFromTriplet is a helper to adapt Prometheus unit tests to the new API based on MetricFamily.
+func untypedFromTriplet(name string, t int64, v float64) *MetricFamily {
+	return &MetricFamily{
+		MetricFamily: &dto.MetricFamily{
+			Name: proto.String(name),
+			Type: dto.MetricType_UNTYPED.Enum(),
+			Metric: []*dto.Metric{
+				&dto.Metric{
+					Untyped: &dto.Untyped{
+						Value: proto.Float64(v),
+					},
+					TimestampMs: proto.Int64(t),
 				},
-				TimestampMs: proto.Int64(t),
 			},
+		},
+		MetricResetTimestampMs: []*int64{
+			proto.Int64(1234567890432),
 		},
 	}
 }
 
-func addMetricLabels(metricFamily *dto.MetricFamily, labelName, labelValue string) *dto.MetricFamily {
+func addMetricLabels(metricFamily *MetricFamily, labelName, labelValue string) *MetricFamily {
 	for _, metric := range metricFamily.Metric {
 		metric.Label = append(metric.Label, &dto.LabelPair{
 			Name:  proto.String(labelName),

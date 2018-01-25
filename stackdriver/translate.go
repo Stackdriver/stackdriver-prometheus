@@ -21,14 +21,10 @@ import (
 	"github.com/go-kit/kit/log"
 	"github.com/go-kit/kit/log/level"
 	"github.com/golang/glog"
+	"github.com/jkohen/prometheus/retrieval"
 	dto "github.com/prometheus/client_model/go"
 	"github.com/prometheus/prometheus/pkg/timestamp"
 	monitoring "google.golang.org/api/monitoring/v3"
-)
-
-const (
-	// Built-in Prometheus metric exporting process start time.
-	processStartTimeMetric = "process_start_time_seconds"
 )
 
 var supportedMetricTypes = map[dto.MetricType]bool{
@@ -65,13 +61,7 @@ func NewTranslator(logger log.Logger, metricsPrefix string, resourceMappings []R
 
 // ToCreateTimeSeriesRequest translates metrics in Prometheus format to Stackdriver format.
 func (t *Translator) ToCreateTimeSeriesRequest(
-	metrics []*dto.MetricFamily) *monitoring.CreateTimeSeriesRequest {
-
-	startTime, err := getStartTime(metrics)
-	if err != nil {
-		level.Error(t.logger).Log("sample_metric", metrics[0], "err", err)
-		// Continue with the default startTime.
-	}
+	metrics []*retrieval.MetricFamily) *monitoring.CreateTimeSeriesRequest {
 
 	// TODO(jkohen): See if it's possible for Prometheus to pass two points
 	// for the same time series, which isn't accepted by the Stackdriver
@@ -80,7 +70,7 @@ func (t *Translator) ToCreateTimeSeriesRequest(
 		TimeSeries: []*monitoring.TimeSeries{},
 	}
 	for _, family := range metrics {
-		tss, err := t.translateFamily(family, startTime)
+		tss, err := t.translateFamily(family)
 		if err != nil {
 			// Ignore unsupported type errors, they're just noise.
 			if _, ok := err.(*unsupportedTypeError); !ok {
@@ -96,35 +86,13 @@ func (t *Translator) ToCreateTimeSeriesRequest(
 	return request
 }
 
-func getStartTime(metrics []*dto.MetricFamily) (time.Time, error) {
-	// For cumulative metrics we need to know process start time.
-	for _, family := range metrics {
-		if family.GetName() == processStartTimeMetric &&
-			family.GetType() == dto.MetricType_GAUGE &&
-			len(family.GetMetric()) == 1 {
-
-			value := family.Metric[0].Gauge.GetValue()
-			startSeconds := math.Trunc(value)
-			startNanos := 1000000000 * (value - startSeconds)
-			return time.Unix(int64(startSeconds), int64(startNanos)), nil
-		}
-	}
-	// If the process start time is not specified, assuming it's
-	// the unix 1 second, because Stackdriver can't handle
-	// unix zero or unix negative number.
-	return time.Unix(1, 0),
-		fmt.Errorf("metric %s invalid or not defined, cumulative will be inaccurate",
-			processStartTimeMetric)
-}
-
-func (t *Translator) translateFamily(family *dto.MetricFamily,
-	startTime time.Time) ([]*monitoring.TimeSeries, error) {
-
+func (t *Translator) translateFamily(family *retrieval.MetricFamily) ([]*monitoring.TimeSeries, error) {
 	var tss []*monitoring.TimeSeries
 	if _, found := supportedMetricTypes[family.GetType()]; !found {
 		return tss, &unsupportedTypeError{family.GetType()}
 	}
-	for _, metric := range family.GetMetric() {
+	for i, metric := range family.GetMetric() {
+		startTime := timestamp.Time(*family.MetricResetTimestampMs[i])
 		ts, err := t.translateOne(family.GetName(), family.GetType(), metric, startTime)
 		if err != nil {
 			return nil, err

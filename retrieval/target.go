@@ -23,7 +23,6 @@ import (
 	"sync"
 	"time"
 
-	dto "github.com/prometheus/client_model/go"
 	"github.com/prometheus/common/model"
 
 	"github.com/prometheus/prometheus/config"
@@ -198,7 +197,7 @@ type limitAppender struct {
 	i     int
 }
 
-func (app *limitAppender) Add(metricFamily *dto.MetricFamily) error {
+func (app *limitAppender) Add(metricFamily *MetricFamily) error {
 	app.i += len(metricFamily.Metric)
 	fmt.Println(app.i, app.limit)
 	if app.i > app.limit {
@@ -213,7 +212,7 @@ type timeLimitAppender struct {
 	maxTime int64
 }
 
-func (app *timeLimitAppender) Add(metricFamily *dto.MetricFamily) error {
+func (app *timeLimitAppender) Add(metricFamily *MetricFamily) error {
 	// Each metric in a family has an independent timestamp, so we should
 	// filter each selectively. On the other hand, this is probably rare, so
 	// if any metric fails to comply we just reject the entire family.

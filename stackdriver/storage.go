@@ -21,7 +21,6 @@ import (
 
 	"github.com/go-kit/kit/log"
 	"github.com/jkohen/prometheus/retrieval"
-	dto "github.com/prometheus/client_model/go"
 	"github.com/prometheus/prometheus/config"
 )
 
@@ -45,7 +44,7 @@ func (s *Storage) Appender() (retrieval.Appender, error) {
 }
 
 // Add implements the retrieval.Appender interface.
-func (s *Storage) Add(metricFamily *dto.MetricFamily) error {
+func (s *Storage) Add(metricFamily *retrieval.MetricFamily) error {
 	s.mtx.RLock()
 	defer s.mtx.RUnlock()
 	for _, q := range s.queues {

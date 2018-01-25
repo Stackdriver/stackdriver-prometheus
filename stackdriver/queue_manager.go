@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/golang/protobuf/proto"
+	"github.com/jkohen/prometheus/retrieval"
 	dto "github.com/prometheus/client_model/go"
 	"golang.org/x/time/rate"
 	monitoring "google.golang.org/api/monitoring/v3"
@@ -195,8 +196,8 @@ func NewQueueManager(logger log.Logger, cfg config.QueueConfig, externalLabels m
 // Append queues a sample to be sent to the remote storage. It drops the
 // sample on the floor if the queue is full.
 // Always returns nil.
-func (t *QueueManager) Append(sample *dto.MetricFamily) error {
-	metricFamily := proto.Clone(sample).(*dto.MetricFamily)
+func (t *QueueManager) Append(sample *retrieval.MetricFamily) error {
+	metricFamily := proto.Clone(sample).(*retrieval.MetricFamily)
 
 	for _, metric := range metricFamily.Metric {
 		metricLabels := make(map[string]struct{}, len(metric.Label))
@@ -372,15 +373,15 @@ func (t *QueueManager) reshard(n int) {
 
 type shards struct {
 	qm     *QueueManager
-	queues []chan *dto.MetricFamily
+	queues []chan *retrieval.MetricFamily
 	done   chan struct{}
 	wg     sync.WaitGroup
 }
 
 func (t *QueueManager) newShards(numShards int) *shards {
-	queues := make([]chan *dto.MetricFamily, numShards)
+	queues := make([]chan *retrieval.MetricFamily, numShards)
 	for i := 0; i < numShards; i++ {
-		queues[i] = make(chan *dto.MetricFamily, t.cfg.Capacity)
+		queues[i] = make(chan *retrieval.MetricFamily, t.cfg.Capacity)
 	}
 	s := &shards{
 		qm:     t,
@@ -408,13 +409,13 @@ func (s *shards) stop() {
 	s.wg.Wait()
 }
 
-func fingerprint(sample *dto.MetricFamily) uint32 {
+func fingerprint(sample *retrieval.MetricFamily) uint32 {
 	h := fnv.New32a()
 	h.Write([]byte(sample.GetName()))
 	return h.Sum32()
 }
 
-func (s *shards) enqueue(sample *dto.MetricFamily) bool {
+func (s *shards) enqueue(sample *retrieval.MetricFamily) bool {
 	s.qm.samplesIn.incr(1)
 
 	fp := fingerprint(sample)
@@ -435,7 +436,7 @@ func (s *shards) runShard(i int) {
 	// Send batches of at most MaxSamplesPerSend samples to the remote storage.
 	// If we have fewer samples than that, flush them out after a deadline
 	// anyways.
-	pendingSamples := []*dto.MetricFamily{}
+	pendingSamples := []*retrieval.MetricFamily{}
 
 	for {
 		select {
@@ -465,7 +466,7 @@ func (s *shards) runShard(i int) {
 	}
 }
 
-func (s *shards) sendSamples(samples []*dto.MetricFamily) {
+func (s *shards) sendSamples(samples []*retrieval.MetricFamily) {
 	begin := time.Now()
 	s.sendSamplesWithBackoff(samples)
 
@@ -476,7 +477,7 @@ func (s *shards) sendSamples(samples []*dto.MetricFamily) {
 }
 
 // sendSamples to the remote storage with backoff for recoverable errors.
-func (s *shards) sendSamplesWithBackoff(samples []*dto.MetricFamily) {
+func (s *shards) sendSamplesWithBackoff(samples []*retrieval.MetricFamily) {
 	backoff := s.qm.cfg.MinBackoff
 	translator := NewTranslator(s.qm.logger, metricsPrefix, DefaultResourceMappings)
 	for retries := s.qm.cfg.MaxRetries; retries > 0; retries-- {
