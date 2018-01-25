@@ -26,6 +26,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/clock"
 
 	"github.com/go-kit/kit/log"
+	"github.com/gogo/protobuf/proto"
 	dto "github.com/prometheus/client_model/go"
 	"github.com/stretchr/testify/assert"
 )
@@ -63,7 +64,8 @@ var metrics = []*dto.MetricFamily{
 						Value: stringPtr("labelValue1"),
 					},
 				},
-				Counter: &dto.Counter{Value: floatPtr(42.0)},
+				Counter:     &dto.Counter{Value: floatPtr(42.0)},
+				TimestampMs: proto.Int64(1234568000432),
 			},
 			{
 				Label: []*dto.LabelPair{
@@ -72,7 +74,8 @@ var metrics = []*dto.MetricFamily{
 						Value: stringPtr("labelValue2"),
 					},
 				},
-				Counter: &dto.Counter{Value: floatPtr(106.0)},
+				Counter:     &dto.Counter{Value: floatPtr(106.0)},
+				TimestampMs: proto.Int64(1234568000432),
 			},
 		},
 	},
@@ -87,7 +90,8 @@ var metrics = []*dto.MetricFamily{
 						Value: stringPtr("falseValue"),
 					},
 				},
-				Gauge: &dto.Gauge{Value: floatPtr(0.00001)},
+				Gauge:       &dto.Gauge{Value: floatPtr(0.00001)},
+				TimestampMs: proto.Int64(1234568000432),
 			},
 			{
 				Label: []*dto.LabelPair{
@@ -96,7 +100,8 @@ var metrics = []*dto.MetricFamily{
 						Value: stringPtr("trueValue"),
 					},
 				},
-				Gauge: &dto.Gauge{Value: floatPtr(1.2)},
+				Gauge:       &dto.Gauge{Value: floatPtr(1.2)},
+				TimestampMs: proto.Int64(1234568000432),
 			},
 		},
 	},
@@ -105,7 +110,8 @@ var metrics = []*dto.MetricFamily{
 		Type: &metricTypeCounter,
 		Metric: []*dto.Metric{
 			{
-				Counter: &dto.Counter{Value: floatPtr(123.17)},
+				Counter:     &dto.Counter{Value: floatPtr(123.17)},
+				TimestampMs: proto.Int64(1234568000432),
 			},
 		},
 	},
@@ -114,7 +120,8 @@ var metrics = []*dto.MetricFamily{
 		Type: &metricTypeGauge,
 		Metric: []*dto.Metric{
 			{
-				Gauge: &dto.Gauge{Value: floatPtr(1234567890.0)},
+				Gauge:       &dto.Gauge{Value: floatPtr(1234567890.4321)},
+				TimestampMs: proto.Int64(1234568000432),
 			},
 		},
 	},
@@ -146,6 +153,7 @@ var metrics = []*dto.MetricFamily{
 						},
 					},
 				},
+				TimestampMs: proto.Int64(1234568000432),
 			},
 		},
 	},
@@ -175,7 +183,8 @@ func TestToCreateTimeSeriesRequest(t *testing.T) {
 		assert.Equal(t, "CUMULATIVE", metric.MetricKind)
 
 		assert.Equal(t, 1, len(metric.Points))
-		assert.Equal(t, "2009-02-13T23:31:30Z", metric.Points[0].Interval.StartTime)
+		assert.Equal(t, "2009-02-13T23:31:30.432100057Z", metric.Points[0].Interval.StartTime)
+		assert.Equal(t, "2009-02-13T23:33:20.432Z", metric.Points[0].Interval.EndTime)
 
 		labels := metric.Metric.Labels
 		assert.Equal(t, 1, len(labels))
@@ -205,6 +214,7 @@ func TestToCreateTimeSeriesRequest(t *testing.T) {
 		} else {
 			t.Errorf("Wrong label labelName value %s", labels["labelName"])
 		}
+		assert.Equal(t, "2009-02-13T23:33:20.432Z", metric.Points[0].Interval.EndTime)
 	}
 
 	// Then a single cumulative float value.
@@ -214,7 +224,8 @@ func TestToCreateTimeSeriesRequest(t *testing.T) {
 	assert.Equal(t, "CUMULATIVE", metric.MetricKind)
 	assert.InEpsilon(t, 123.17, *(metric.Points[0].Value.DoubleValue), epsilon)
 	assert.Equal(t, 1, len(metric.Points))
-	assert.Equal(t, "2009-02-13T23:31:30Z", metric.Points[0].Interval.StartTime)
+	assert.Equal(t, "2009-02-13T23:31:30.432100057Z", metric.Points[0].Interval.StartTime)
+	assert.Equal(t, "2009-02-13T23:33:20.432Z", metric.Points[0].Interval.EndTime)
 
 	// Then a single gauge float value.
 	metric = ts[5]
@@ -222,7 +233,8 @@ func TestToCreateTimeSeriesRequest(t *testing.T) {
 	assert.Equal(t, "DOUBLE", metric.ValueType)
 	assert.Equal(t, "GAUGE", metric.MetricKind)
 	assert.Equal(t, 1, len(metric.Points))
-	assert.Equal(t, float64(1234567890), *(metric.Points[0].Value.DoubleValue))
+	assert.InEpsilon(t, 1234567890.4321, *(metric.Points[0].Value.DoubleValue), epsilon)
+	assert.Equal(t, "2009-02-13T23:33:20.432Z", metric.Points[0].Interval.EndTime)
 
 	// Histogram
 	metric = ts[6]
@@ -230,6 +242,7 @@ func TestToCreateTimeSeriesRequest(t *testing.T) {
 	assert.Equal(t, "DISTRIBUTION", metric.ValueType)
 	assert.Equal(t, "CUMULATIVE", metric.MetricKind)
 	assert.Equal(t, 1, len(metric.Points))
+	assert.Equal(t, "2009-02-13T23:33:20.432Z", metric.Points[0].Interval.EndTime)
 
 	p := metric.Points[0]
 
@@ -276,7 +289,8 @@ func TestUnknownMonitoredResource(t *testing.T) {
 							Value: stringPtr("labelValue1"),
 						},
 					},
-					Counter: &dto.Counter{Value: floatPtr(42.0)},
+					Counter:     &dto.Counter{Value: floatPtr(42.0)},
+					TimestampMs: proto.Int64(1234568000432),
 				},
 			},
 		},
@@ -313,7 +327,8 @@ func TestDropsInternalLabels(t *testing.T) {
 							Value: stringPtr("y"),
 						},
 					},
-					Counter: &dto.Counter{Value: floatPtr(42.0)},
+					Counter:     &dto.Counter{Value: floatPtr(42.0)},
+					TimestampMs: proto.Int64(1234568000432),
 				},
 			},
 		},
@@ -322,7 +337,8 @@ func TestDropsInternalLabels(t *testing.T) {
 			Type: &metricTypeGauge,
 			Metric: []*dto.Metric{
 				{
-					Gauge: &dto.Gauge{Value: floatPtr(1234567890.0)},
+					Gauge:       &dto.Gauge{Value: floatPtr(1234567890.4321)},
+					TimestampMs: proto.Int64(1234568000432),
 				},
 			},
 		},
@@ -345,7 +361,7 @@ func TestDropsInternalLabels(t *testing.T) {
 	assert.Equal(t, "CUMULATIVE", metric.MetricKind)
 
 	assert.Equal(t, 1, len(metric.Points))
-	assert.Equal(t, "2009-02-13T23:31:30Z", metric.Points[0].Interval.StartTime)
+	assert.Equal(t, "2009-02-13T23:31:30.432100057Z", metric.Points[0].Interval.StartTime)
 
 	labels := metric.Metric.Labels
 	assert.Equal(t, 1, len(labels))

@@ -24,6 +24,7 @@ import (
 	"github.com/go-kit/kit/log/level"
 	"github.com/golang/glog"
 	dto "github.com/prometheus/client_model/go"
+	"github.com/prometheus/prometheus/pkg/timestamp"
 	monitoring "google.golang.org/api/monitoring/v3"
 )
 
@@ -161,11 +162,11 @@ func (t *Translator) translateOne(name string,
 			fmt.Errorf("cannot extract Stackdriver monitored resource from metric %v of family %s", metric, name)
 	}
 	interval := &monitoring.TimeInterval{
-		EndTime: time.Now().UTC().Format(time.RFC3339),
+		EndTime: timestamp.Time(metric.GetTimestampMs()).UTC().Format(time.RFC3339Nano),
 	}
 	metricKind := extractMetricKind(mType)
 	if metricKind == "CUMULATIVE" {
-		interval.StartTime = start.UTC().Format(time.RFC3339)
+		interval.StartTime = start.UTC().Format(time.RFC3339Nano)
 	}
 	valueType := extractValueType(mType)
 	point := &monitoring.Point{
