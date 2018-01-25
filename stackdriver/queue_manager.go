@@ -19,8 +19,6 @@ import (
 	"sync"
 	"time"
 
-	"k8s.io/apimachinery/pkg/util/clock"
-
 	"github.com/golang/protobuf/proto"
 	dto "github.com/prometheus/client_model/go"
 	"golang.org/x/time/rate"
@@ -480,7 +478,7 @@ func (s *shards) sendSamples(samples []*dto.MetricFamily) {
 // sendSamples to the remote storage with backoff for recoverable errors.
 func (s *shards) sendSamplesWithBackoff(samples []*dto.MetricFamily) {
 	backoff := s.qm.cfg.MinBackoff
-	translator := NewTranslator(s.qm.logger, clock.Clock(clock.RealClock{}), metricsPrefix, DefaultResourceMappings)
+	translator := NewTranslator(s.qm.logger, metricsPrefix, DefaultResourceMappings)
 	for retries := s.qm.cfg.MaxRetries; retries > 0; retries-- {
 		begin := time.Now()
 		req := translator.ToCreateTimeSeriesRequest(samples)

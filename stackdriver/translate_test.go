@@ -21,9 +21,6 @@ import (
 	"math"
 	"strings"
 	"testing"
-	"time"
-
-	"k8s.io/apimachinery/pkg/util/clock"
 
 	"github.com/go-kit/kit/log"
 	"github.com/gogo/protobuf/proto"
@@ -161,10 +158,8 @@ var metrics = []*dto.MetricFamily{
 
 func TestToCreateTimeSeriesRequest(t *testing.T) {
 	const epsilon = float64(0.001)
-	sampleTime := time.Unix(1234, 567)
 	output := &bytes.Buffer{}
-	translator := NewTranslator(log.NewLogfmtLogger(output),
-		clock.Clock(clock.NewFakeClock(sampleTime)), "metrics.prefix", testResourceMappings)
+	translator := NewTranslator(log.NewLogfmtLogger(output), "metrics.prefix", testResourceMappings)
 	request := translator.ToCreateTimeSeriesRequest(metrics)
 	if request == nil {
 		t.Fatalf("Failed with error %v", output.String())
@@ -295,11 +290,9 @@ func TestUnknownMonitoredResource(t *testing.T) {
 			},
 		},
 	}
-	sampleTime := time.Unix(1234, 567)
 
 	output := &bytes.Buffer{}
-	translator := NewTranslator(log.NewLogfmtLogger(output),
-		clock.Clock(clock.NewFakeClock(sampleTime)), "metrics.prefix", resourceMappings)
+	translator := NewTranslator(log.NewLogfmtLogger(output), "metrics.prefix", resourceMappings)
 	request := translator.ToCreateTimeSeriesRequest(metrics)
 	if len(request.TimeSeries) > 0 {
 		t.Fatalf("expected empty request, but got %v", request)
@@ -343,11 +336,9 @@ func TestDropsInternalLabels(t *testing.T) {
 			},
 		},
 	}
-	sampleTime := time.Unix(1234, 567)
 
 	output := &bytes.Buffer{}
-	translator := NewTranslator(log.NewLogfmtLogger(output),
-		clock.Clock(clock.NewFakeClock(sampleTime)), "metrics.prefix", testResourceMappings)
+	translator := NewTranslator(log.NewLogfmtLogger(output), "metrics.prefix", testResourceMappings)
 	request := translator.ToCreateTimeSeriesRequest(metrics)
 	if request == nil {
 		t.Fatalf("Failed with error %v", output.String())

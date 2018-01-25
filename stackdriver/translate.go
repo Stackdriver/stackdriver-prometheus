@@ -18,8 +18,6 @@ import (
 	"strings"
 	"time"
 
-	"k8s.io/apimachinery/pkg/util/clock"
-
 	"github.com/go-kit/kit/log"
 	"github.com/go-kit/kit/log/level"
 	"github.com/golang/glog"
@@ -52,16 +50,14 @@ func (e *unsupportedTypeError) Error() string {
 // Translator allows converting Prometheus samples to Stackdriver TimeSeries.
 type Translator struct {
 	logger           log.Logger
-	clock            clock.Clock
 	metricsPrefix    string
 	resourceMappings []ResourceMap
 }
 
 // NewTranslator creates a new Translator.
-func NewTranslator(logger log.Logger, clock clock.Clock, metricsPrefix string, resourceMappings []ResourceMap) *Translator {
+func NewTranslator(logger log.Logger, metricsPrefix string, resourceMappings []ResourceMap) *Translator {
 	return &Translator{
 		logger:           logger,
-		clock:            clock,
 		metricsPrefix:    metricsPrefix,
 		resourceMappings: resourceMappings,
 	}
