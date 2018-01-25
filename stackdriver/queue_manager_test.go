@@ -60,6 +60,10 @@ func (c *TestStorageClient) waitForExpectedSamples(t *testing.T) {
 
 	c.mtx.Lock()
 	defer c.mtx.Unlock()
+	if len(c.receivedSamples) != len(c.expectedSamples) {
+		t.Fatalf("Expected %d metric families, received %d",
+			len(c.expectedSamples), len(c.receivedSamples))
+	}
 	for name, expectedSamples := range c.expectedSamples {
 		if !reflect.DeepEqual(expectedSamples, c.receivedSamples[name]) {
 			t.Fatalf("%s: Expected %v, got %v", name, expectedSamples, c.receivedSamples[name])
@@ -141,6 +145,38 @@ func TestSampleDeliveryOrder(t *testing.T) {
 	// These should be received by the client.
 	for _, s := range samples {
 		m.Append(sampleToMetricFamily(s))
+	}
+	m.Start()
+	defer m.Stop()
+
+	c.waitForExpectedSamples(t)
+}
+
+// TestEmptyRequest tests the case where the output of the translation is empty
+// (e.g. because all metric types are unsupported), and therefore there is
+// nothing to send to the storage.
+func TestStoreEmptyRequest(t *testing.T) {
+	ts := 10
+	n := config.DefaultQueueConfig.MaxSamplesPerSend * ts
+
+	samples := make([]sample, 0, n)
+	for i := 0; i < n; i++ {
+		name := fmt.Sprintf("test_metric_%d", i%ts)
+		samples = append(samples, sample{Name: name, Value: float64(i)})
+	}
+
+	c := NewTestStorageClient()
+	m := NewQueueManager(nil, config.DefaultQueueConfig, nil, c)
+
+	// These should be received by the client.
+	for _, s := range samples {
+		m.Append(&dto.MetricFamily{
+			Name: proto.String(s.Name),
+			Type: dto.MetricType_UNTYPED.Enum(),
+			Metric: []*dto.Metric{
+				&dto.Metric{},
+			},
+		})
 	}
 	m.Start()
 	defer m.Stop()
