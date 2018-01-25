@@ -40,6 +40,14 @@ var supportedMetricTypes = map[dto.MetricType]bool{
 
 const falseValueEpsilon = 0.001
 
+type unsupportedTypeError struct {
+	metricType dto.MetricType
+}
+
+func (e *unsupportedTypeError) Error() string {
+	return e.metricType.String()
+}
+
 // Translator allows converting Prometheus samples to Stackdriver TimeSeries.
 type Translator struct {
 	logger           log.Logger
@@ -77,10 +85,13 @@ func (t *Translator) ToCreateTimeSeriesRequest(
 	for _, family := range metrics {
 		tss, err := t.translateFamily(family, startTime)
 		if err != nil {
-			level.Warn(t.logger).Log(
-				"msg", "error while processing metric",
-				"metric", family.GetName(),
-				"err", err)
+			// Ignore unsupported type errors, they're just noise.
+			if _, ok := err.(*unsupportedTypeError); !ok {
+				level.Warn(t.logger).Log(
+					"msg", "error while processing metric",
+					"metric", family.GetName(),
+					"err", err)
+			}
 		} else {
 			request.TimeSeries = append(request.TimeSeries, tss...)
 		}
@@ -114,7 +125,7 @@ func (t *Translator) translateFamily(family *dto.MetricFamily,
 
 	var tss []*monitoring.TimeSeries
 	if _, found := supportedMetricTypes[family.GetType()]; !found {
-		return tss, fmt.Errorf("Metric type %v of family %s not supported", family.GetType(), family.GetName())
+		return tss, &unsupportedTypeError{family.GetType()}
 	}
 	for _, metric := range family.GetMetric() {
 		ts, err := t.translateOne(family.GetName(), family.GetType(), metric, startTime)
