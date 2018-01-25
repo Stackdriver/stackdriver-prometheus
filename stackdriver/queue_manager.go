@@ -493,7 +493,7 @@ func (s *shards) sendSamplesWithBackoff(samples []*dto.MetricFamily) {
 		}
 
 		if _, ok := err.(recoverableError); !ok {
-			level.Warn(s.qm.logger).Log("msg", "Unrecoverable error sending samples to remote storage", "count", len(samples), "err", err)
+			level.Warn(s.qm.logger).Log("msg", "Unrecoverable error sending samples to remote storage", "err", err)
 			break
 		}
 		time.Sleep(backoff)
