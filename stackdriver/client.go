@@ -56,9 +56,13 @@ type ClientConfig struct {
 
 // NewClient creates a new Client.
 func NewClient(index int, conf *ClientConfig) (*Client, error) {
+	logger := conf.Logger
+	if logger == nil {
+		logger = log.NewNopLogger()
+	}
 	return &Client{
 		index:     index,
-		logger:    conf.Logger,
+		logger:    logger,
 		projectId: conf.ProjectId,
 		url:       conf.URL,
 		timeout:   time.Duration(conf.Timeout),
