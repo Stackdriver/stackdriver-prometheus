@@ -15,7 +15,6 @@ package stackdriver
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -74,7 +73,8 @@ type recoverableError struct {
 func (c *Client) Store(req *monitoring.CreateTimeSeriesRequest) error {
 	tss := req.TimeSeries
 	if len(tss) == 0 {
-		return errors.New("received empty request")
+		// Nothing to do, return silently.
+		return nil
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), c.timeout)

@@ -126,9 +126,7 @@ func TestEmptyRequest(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	expected_error := "received empty request"
-	err = c.Store(&monitoring.CreateTimeSeriesRequest{})
-	if err.Error() != expected_error {
-		t.Errorf("Unexpected error; want %v, got %v", expected_error, err)
+	if err := c.Store(&monitoring.CreateTimeSeriesRequest{}); err != nil {
+		t.Fatal(err)
 	}
 }
