@@ -42,7 +42,7 @@ var DefaultResourceMappings = []ResourceMap{
 	{
 		Type: "k8s_container",
 		LabelMap: map[string]string{
-			ProjectIdLabel:                   "project",
+			ProjectIdLabel:                   "project_id",
 			"_kubernetes_location":           "location",
 			"_kubernetes_cluster_name":       "cluster_name",
 			"_kubernetes_namespace":          "namespace_name",
@@ -54,7 +54,7 @@ var DefaultResourceMappings = []ResourceMap{
 	{
 		Type: "k8s_pod",
 		LabelMap: map[string]string{
-			ProjectIdLabel:              "project",
+			ProjectIdLabel:              "project_id",
 			"_kubernetes_location":      "location",
 			"_kubernetes_cluster_name":  "cluster_name",
 			"_kubernetes_namespace":     "namespace_name",
@@ -65,7 +65,7 @@ var DefaultResourceMappings = []ResourceMap{
 	{
 		Type: "k8s_node",
 		LabelMap: map[string]string{
-			ProjectIdLabel:             "project",
+			ProjectIdLabel:             "project_id",
 			"_kubernetes_location":     "location",
 			"_kubernetes_cluster_name": "cluster_name",
 			"_kubernetes_node_name":    "node_name",
