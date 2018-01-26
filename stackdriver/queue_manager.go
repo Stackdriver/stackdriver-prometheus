@@ -142,11 +142,12 @@ type StorageClient interface {
 type QueueManager struct {
 	logger log.Logger
 
-	cfg            config.QueueConfig
-	externalLabels model.LabelSet
-	client         StorageClient
-	queueName      string
-	logLimiter     *rate.Limiter
+	cfg              config.QueueConfig
+	externalLabels   model.LabelSet
+	client           StorageClient
+	queueName        string
+	logLimiter       *rate.Limiter
+	k8sResourceTypes bool
 
 	shardsMtx   sync.Mutex
 	shards      *shards
@@ -160,16 +161,17 @@ type QueueManager struct {
 }
 
 // NewQueueManager builds a new QueueManager.
-func NewQueueManager(logger log.Logger, cfg config.QueueConfig, externalLabels model.LabelSet, client StorageClient) *QueueManager {
+func NewQueueManager(logger log.Logger, cfg config.QueueConfig, externalLabels model.LabelSet, client StorageClient, sdCfg *StackdriverConfig) *QueueManager {
 	if logger == nil {
 		logger = log.NewNopLogger()
 	}
 	t := &QueueManager{
-		logger:         logger,
-		cfg:            cfg,
-		externalLabels: externalLabels,
-		client:         client,
-		queueName:      client.Name(),
+		logger:           logger,
+		cfg:              cfg,
+		externalLabels:   externalLabels,
+		client:           client,
+		queueName:        client.Name(),
+		k8sResourceTypes: sdCfg.K8sResourceTypes,
 
 		logLimiter:  rate.NewLimiter(logRateLimit, logBurst),
 		numShards:   1,
@@ -479,7 +481,7 @@ func (s *shards) sendSamples(samples []*retrieval.MetricFamily) {
 // sendSamples to the remote storage with backoff for recoverable errors.
 func (s *shards) sendSamplesWithBackoff(samples []*retrieval.MetricFamily) {
 	backoff := s.qm.cfg.MinBackoff
-	translator := NewTranslator(s.qm.logger, metricsPrefix, DefaultResourceMappings)
+	translator := NewTranslator(s.qm.logger, metricsPrefix, DefaultResourceMappings, s.qm.k8sResourceTypes)
 	for retries := s.qm.cfg.MaxRetries; retries > 0; retries-- {
 		begin := time.Now()
 		req := translator.ToCreateTimeSeriesRequest(samples)

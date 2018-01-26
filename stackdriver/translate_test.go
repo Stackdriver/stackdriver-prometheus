@@ -49,6 +49,14 @@ var testResourceMappings = []ResourceMap{
 	},
 }
 
+var testK8sResourceMappings = []ResourceMap{
+	{
+		// The empty label map matches every metric possible.
+		Type:     "k8s_container",
+		LabelMap: map[string]string{},
+	},
+}
+
 var metrics = []*retrieval.MetricFamily{
 	{
 		MetricFamily: &dto.MetricFamily{
@@ -172,7 +180,7 @@ var metrics = []*retrieval.MetricFamily{
 func TestToCreateTimeSeriesRequest(t *testing.T) {
 	const epsilon = float64(0.001)
 	output := &bytes.Buffer{}
-	translator := NewTranslator(log.NewLogfmtLogger(output), "metrics.prefix", testResourceMappings)
+	translator := NewTranslator(log.NewLogfmtLogger(output), "metrics.prefix", testResourceMappings, false)
 	request := translator.ToCreateTimeSeriesRequest(metrics)
 	if request == nil {
 		t.Fatalf("Failed with error %v", output.String())
@@ -186,6 +194,7 @@ func TestToCreateTimeSeriesRequest(t *testing.T) {
 	// First two counter values.
 	for i := 0; i <= 1; i++ {
 		metric := ts[i]
+		assert.Equal(t, "gke_container", metric.Resource.Type)
 		assert.Equal(t, "metrics.prefix/test_name", metric.Metric.Type)
 		assert.Equal(t, "DOUBLE", metric.ValueType)
 		assert.Equal(t, "CUMULATIVE", metric.MetricKind)
@@ -210,6 +219,7 @@ func TestToCreateTimeSeriesRequest(t *testing.T) {
 	// Then two gauge values.
 	for i := 2; i <= 3; i++ {
 		metric := ts[i]
+		assert.Equal(t, "gke_container", metric.Resource.Type)
 		assert.Equal(t, "metrics.prefix/gauge_metric", metric.Metric.Type)
 		assert.Equal(t, "DOUBLE", metric.ValueType)
 		assert.Equal(t, "GAUGE", metric.MetricKind)
@@ -228,6 +238,7 @@ func TestToCreateTimeSeriesRequest(t *testing.T) {
 
 	// Then a single cumulative float value.
 	metric := ts[4]
+	assert.Equal(t, "gke_container", metric.Resource.Type)
 	assert.Equal(t, "metrics.prefix/float_metric", metric.Metric.Type)
 	assert.Equal(t, "DOUBLE", metric.ValueType)
 	assert.Equal(t, "CUMULATIVE", metric.MetricKind)
@@ -238,6 +249,7 @@ func TestToCreateTimeSeriesRequest(t *testing.T) {
 
 	// Histogram
 	metric = ts[5]
+	assert.Equal(t, "gke_container", metric.Resource.Type)
 	assert.Equal(t, "metrics.prefix/test_histogram", metric.Metric.Type)
 	assert.Equal(t, "DISTRIBUTION", metric.ValueType)
 	assert.Equal(t, "CUMULATIVE", metric.MetricKind)
@@ -302,7 +314,7 @@ func TestUnknownMonitoredResource(t *testing.T) {
 	}
 
 	output := &bytes.Buffer{}
-	translator := NewTranslator(log.NewLogfmtLogger(output), "metrics.prefix", resourceMappings)
+	translator := NewTranslator(log.NewLogfmtLogger(output), "metrics.prefix", resourceMappings, false)
 	request := translator.ToCreateTimeSeriesRequest(metrics)
 	if len(request.TimeSeries) > 0 {
 		t.Fatalf("expected empty request, but got %v", request)
@@ -310,6 +322,50 @@ func TestUnknownMonitoredResource(t *testing.T) {
 	if !strings.Contains(output.String(), "cannot extract Stackdriver monitored resource") {
 		t.Fatalf("missing \"cannot extract Stackdriver monitored resource\" from the output %v", output.String())
 	}
+}
+
+func TestK8sResourceTypes(t *testing.T) {
+	metrics := []*retrieval.MetricFamily{
+		{
+			MetricFamily: &dto.MetricFamily{
+				Name: &testMetricName,
+				Type: &metricTypeCounter,
+				Help: &testMetricDescription,
+				Metric: []*dto.Metric{
+					{
+						Counter:     &dto.Counter{Value: proto.Float64(1.0)},
+						TimestampMs: proto.Int64(1234568000432),
+					},
+				},
+			},
+			MetricResetTimestampMs: []*int64{
+				proto.Int64(1234567890432),
+			},
+		},
+	}
+
+	const epsilon = float64(0.001)
+	output := &bytes.Buffer{}
+	translator := NewTranslator(log.NewLogfmtLogger(output), "metrics.prefix", testK8sResourceMappings, true)
+	request := translator.ToCreateTimeSeriesRequest(metrics)
+	if request == nil {
+		t.Fatalf("Failed with error %v", output.String())
+	} else if output.Len() > 0 {
+		t.Logf("succeeded with messages %v", output.String())
+	}
+
+	assert.Equal(t, 1, len(request.TimeSeries))
+	metric := request.TimeSeries[0]
+
+	assert.Equal(t, "k8s_container", metric.Resource.Type)
+	assert.Equal(t, "metrics.prefix/test_name", metric.Metric.Type)
+	assert.Equal(t, "DOUBLE", metric.ValueType)
+	assert.Equal(t, "CUMULATIVE", metric.MetricKind)
+
+	assert.Equal(t, 1, len(metric.Points))
+	assert.Equal(t, "2009-02-13T23:33:20.432Z", metric.Points[0].Interval.EndTime)
+	assert.Equal(t, "2009-02-13T23:31:30.432Z", metric.Points[0].Interval.StartTime)
+	assert.Equal(t, float64(1), *(metric.Points[0].Value.DoubleValue))
 }
 
 func TestDropsInternalLabels(t *testing.T) {
@@ -343,7 +399,7 @@ func TestDropsInternalLabels(t *testing.T) {
 	}
 
 	output := &bytes.Buffer{}
-	translator := NewTranslator(log.NewLogfmtLogger(output), "metrics.prefix", testResourceMappings)
+	translator := NewTranslator(log.NewLogfmtLogger(output), "metrics.prefix", testResourceMappings, false)
 	request := translator.ToCreateTimeSeriesRequest(metrics)
 	if request == nil {
 		t.Fatalf("Failed with error %v", output.String())

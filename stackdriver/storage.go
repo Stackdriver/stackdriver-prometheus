@@ -26,15 +26,17 @@ import (
 
 type Storage struct {
 	logger log.Logger
+	cfg    *StackdriverConfig
 	mtx    sync.RWMutex
 
 	// For writes
 	queues []*QueueManager
 }
 
-func NewStorage(logger log.Logger) *Storage {
+func NewStorage(logger log.Logger, cfg *StackdriverConfig) *Storage {
 	return &Storage{
 		logger: logger,
+		cfg:    cfg,
 	}
 }
 
@@ -100,6 +102,7 @@ func (s *Storage) ApplyConfig(conf *config.Config) error {
 			config.DefaultQueueConfig,
 			conf.GlobalConfig.ExternalLabels,
 			c,
+			s.cfg,
 		))
 	}
 

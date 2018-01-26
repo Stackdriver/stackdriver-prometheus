@@ -113,7 +113,7 @@ func TestSampleDelivery(t *testing.T) {
 
 	cfg := config.DefaultQueueConfig
 	cfg.MaxShards = 1
-	m := NewQueueManager(nil, cfg, nil, c)
+	m := NewQueueManager(nil, cfg, nil, c, &DefaultStackdriverConfig)
 
 	// These should be received by the client.
 	for _, s := range samples[:len(samples)/2] {
@@ -141,7 +141,7 @@ func TestSampleDeliveryOrder(t *testing.T) {
 
 	c := NewTestStorageClient()
 	c.expectSamples(samples)
-	m := NewQueueManager(nil, config.DefaultQueueConfig, nil, c)
+	m := NewQueueManager(nil, config.DefaultQueueConfig, nil, c, &DefaultStackdriverConfig)
 
 	// These should be received by the client.
 	for _, s := range samples {
@@ -167,7 +167,7 @@ func TestStoreEmptyRequest(t *testing.T) {
 	}
 
 	c := NewTestStorageClient()
-	m := NewQueueManager(nil, config.DefaultQueueConfig, nil, c)
+	m := NewQueueManager(nil, config.DefaultQueueConfig, nil, c, &DefaultStackdriverConfig)
 
 	// These should be received by the client.
 	for _, s := range samples {
@@ -251,7 +251,7 @@ func TestSpawnNotMoreThanMaxConcurrentSendsGoroutines(t *testing.T) {
 	cfg := config.DefaultQueueConfig
 	cfg.MaxShards = 1
 	cfg.Capacity = n
-	m := NewQueueManager(nil, cfg, nil, c)
+	m := NewQueueManager(nil, cfg, nil, c, &DefaultStackdriverConfig)
 
 	m.Start()
 

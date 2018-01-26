@@ -74,11 +74,14 @@ func main() {
 	cfg := struct {
 		configFile string
 
-		prometheusURL string
-		listenAddress string
+		sdCfg            stackdriver.StackdriverConfig
+		k8sResourceTypes bool
+		listenAddress    string
 
 		logLevel promlog.AllowedLevel
-	}{}
+	}{
+		sdCfg: stackdriver.DefaultStackdriverConfig,
+	}
 
 	a := kingpin.New(filepath.Base(os.Args[0]), "The Prometheus monitoring server")
 
@@ -88,6 +91,10 @@ func main() {
 
 	a.Flag("config.file", "Prometheus configuration file path.").
 		Default("prometheus.yml").StringVar(&cfg.configFile)
+
+	a.Flag("stackdriver.k8s-resource-types",
+		"Whether to export Stackdriver k8s_* resource types, otherwise export gke_container.").
+		Default("false").BoolVar(&cfg.sdCfg.K8sResourceTypes)
 
 	a.Flag("web.listen-address", "Address to listen on for UI, API, and telemetry.").
 		Default("0.0.0.0:9090").StringVar(&cfg.listenAddress)
@@ -118,7 +125,7 @@ func main() {
 	level.Info(logger).Log("fd_limits", FdLimits())
 
 	var (
-		remoteStorage          = stackdriver.NewStorage(log.With(logger, "component", "remote"))
+		remoteStorage          = stackdriver.NewStorage(log.With(logger, "component", "remote"), &cfg.sdCfg)
 		discoveryManagerScrape = discovery.NewManager(log.With(logger, "component", "discovery manager scrape"))
 		scrapeManager          = retrieval.NewScrapeManager(log.With(logger, "component", "scrape manager"), remoteStorage)
 	)
