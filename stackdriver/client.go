@@ -109,6 +109,7 @@ func (c *Client) Store(req *monitoring.CreateTimeSeriesRequest) error {
 			}
 			_, err := service.Projects.TimeSeries.Create(c.projectId, req_copy).Context(ctx).Do()
 			if err != nil {
+				level.Debug(c.logger).Log("msg", "Partial failure calling CreateTimeSeries", "err", err)
 				gerr, ok := err.(*googleapi.Error)
 				if !ok {
 					level.Warn(c.logger).Log("msg", "Unexpected error message type from Monitoring API", "err", err)
