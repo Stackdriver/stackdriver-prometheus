@@ -55,6 +55,10 @@ test:
 	@echo ">> running all tests"
 	@$(GO) test $(shell $(GO) list ./... | grep -v /vendor/ | grep -v examples)
 
+cover:
+	@echo ">> running all tests with coverage"
+	@$(GO) test -coverprofile=coverage.out $(shell $(GO) list ./... | grep -v /vendor/ | grep -v examples)
+
 format:
 	@echo ">> formatting code"
 	@$(GO) fmt $(pkgs)
