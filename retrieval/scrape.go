@@ -649,6 +649,7 @@ func (sl *scrapeLoop) append(b []byte, ts time.Time) (total, added int, err erro
 		resetTimeMs = proto.Int64(NoTimestamp)
 	} else {
 		resetTimeMs = proto.Int64(timestamp.FromTime(resetTime))
+		level.Debug(sl.l).Log("msg", "extracted process start time", "time", resetTime)
 	}
 
 loop:
