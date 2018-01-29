@@ -30,6 +30,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/common/model"
 	"github.com/prometheus/prometheus/config"
+	"github.com/prometheus/prometheus/relabel"
 )
 
 // String constants for instrumentation.
@@ -144,6 +145,7 @@ type QueueManager struct {
 
 	cfg              config.QueueConfig
 	externalLabels   model.LabelSet
+	relabelConfigs   []*config.RelabelConfig
 	client           StorageClient
 	queueName        string
 	logLimiter       *rate.Limiter
@@ -161,7 +163,7 @@ type QueueManager struct {
 }
 
 // NewQueueManager builds a new QueueManager.
-func NewQueueManager(logger log.Logger, cfg config.QueueConfig, externalLabels model.LabelSet, client StorageClient, sdCfg *StackdriverConfig) *QueueManager {
+func NewQueueManager(logger log.Logger, cfg config.QueueConfig, externalLabels model.LabelSet, relabelConfigs []*config.RelabelConfig, client StorageClient, sdCfg *StackdriverConfig) *QueueManager {
 	if logger == nil {
 		logger = log.NewNopLogger()
 	}
@@ -169,6 +171,7 @@ func NewQueueManager(logger log.Logger, cfg config.QueueConfig, externalLabels m
 		logger:           logger,
 		cfg:              cfg,
 		externalLabels:   externalLabels,
+		relabelConfigs:   relabelConfigs,
 		client:           client,
 		queueName:        client.Name(),
 		k8sResourceTypes: sdCfg.K8sResourceTypes,
@@ -200,21 +203,10 @@ func NewQueueManager(logger log.Logger, cfg config.QueueConfig, externalLabels m
 // Always returns nil.
 func (t *QueueManager) Append(sample *retrieval.MetricFamily) error {
 	metricFamily := proto.Clone(sample).(*retrieval.MetricFamily)
-
-	for _, metric := range metricFamily.Metric {
-		metricLabels := make(map[string]struct{}, len(metric.Label))
-		for _, label := range metric.Label {
-			metricLabels[*label.Name] = struct{}{}
-		}
-		for ln, lv := range t.externalLabels {
-			if _, ok := metricLabels[string(ln)]; !ok {
-				metric.Label = append(metric.Label,
-					&dto.LabelPair{
-						Name:  proto.String(string(ln)),
-						Value: proto.String(string(lv)),
-					})
-			}
-		}
+	metricFamily.Metric = t.relabelMetrics(metricFamily.Metric)
+	// Drop family if we dropped all metrics.
+	if metricFamily.Metric == nil {
+		return nil
 	}
 
 	t.shardsMtx.Lock()
@@ -505,4 +497,52 @@ func (s *shards) sendSamplesWithBackoff(samples []*retrieval.MetricFamily) {
 	}
 
 	failedSamplesTotal.WithLabelValues(s.qm.queueName).Add(float64(len(samples)))
+}
+
+// relabelMetrics returns nil if the relabeling requested the metric to be dropped.
+func (t *QueueManager) relabelMetrics(inputMetrics []*dto.Metric) []*dto.Metric {
+	metrics := []*dto.Metric{}
+	for _, metric := range inputMetrics {
+		lset := labelPairsToLabels(metric.Label)
+
+		// Add any external labels. If an external label name is already
+		// found in the set of metric labels, don't add that label.
+		for ln, lv := range t.externalLabels {
+			if _, ok := lset[ln]; !ok {
+				lset[ln] = lv
+			}
+		}
+
+		lset = relabel.Process(lset, t.relabelConfigs...)
+
+		// The label set may be set to nil to indicate dropping.
+		if lset == nil {
+			continue
+		}
+		metric.Label = labelsToLabelPairs(lset)
+		metrics = append(metrics, metric)
+	}
+	if len(metrics) == 0 {
+		return nil
+	}
+	return metrics
+}
+
+func labelPairsToLabels(input []*dto.LabelPair) (output model.LabelSet) {
+	output = make(model.LabelSet)
+	for _, label := range input {
+		output[model.LabelName(label.GetName())] = model.LabelValue(label.GetValue())
+	}
+	return
+}
+
+func labelsToLabelPairs(input model.LabelSet) (output []*dto.LabelPair) {
+	output = make([]*dto.LabelPair, 0, len(input))
+	for ln, lv := range input {
+		output = append(output, &dto.LabelPair{
+			Name:  proto.String(string(ln)),
+			Value: proto.String(string(lv)),
+		})
+	}
+	return
 }

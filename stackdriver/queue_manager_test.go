@@ -24,6 +24,7 @@ import (
 	"github.com/gogo/protobuf/proto"
 	"github.com/jkohen/prometheus/retrieval"
 	dto "github.com/prometheus/client_model/go"
+	"github.com/prometheus/common/model"
 	"github.com/prometheus/prometheus/config"
 	monitoring "google.golang.org/api/monitoring/v3"
 )
@@ -36,8 +37,9 @@ type TestStorageClient struct {
 }
 
 type sample struct {
-	Name  string
-	Value float64
+	Name   string
+	Labels map[string]string
+	Value  float64
 }
 
 func NewTestStorageClient() *TestStorageClient {
@@ -83,8 +85,9 @@ func (c *TestStorageClient) Store(req *monitoring.CreateTimeSeriesRequest) error
 		for _, point := range ts.Points {
 			count++
 			s := sample{
-				Name:  name,
-				Value: *point.Value.DoubleValue,
+				Name:   name,
+				Labels: ts.Metric.Labels,
+				Value:  *point.Value.DoubleValue,
 			}
 			c.receivedSamples[name] = append(c.receivedSamples[name], s)
 		}
@@ -105,7 +108,7 @@ func TestSampleDelivery(t *testing.T) {
 	samples := make([]sample, 0, n)
 	for i := 0; i < n; i++ {
 		name := fmt.Sprintf("test_metric_%d", i)
-		samples = append(samples, sample{Name: name, Value: float64(i)})
+		samples = append(samples, sample{Name: name, Labels: map[string]string{}, Value: float64(i)})
 	}
 
 	c := NewTestStorageClient()
@@ -113,7 +116,7 @@ func TestSampleDelivery(t *testing.T) {
 
 	cfg := config.DefaultQueueConfig
 	cfg.MaxShards = 1
-	m := NewQueueManager(nil, cfg, nil, c, &DefaultStackdriverConfig)
+	m := NewQueueManager(nil, cfg, nil, nil, c, &DefaultStackdriverConfig)
 
 	// These should be received by the client.
 	for _, s := range samples[:len(samples)/2] {
@@ -129,6 +132,63 @@ func TestSampleDelivery(t *testing.T) {
 	c.waitForExpectedSamples(t)
 }
 
+func TestRelabel(t *testing.T) {
+	// This will cause a flush right away.
+	n := config.DefaultQueueConfig.MaxSamplesPerSend
+
+	samples := make([]sample, 0, n)
+	expectedSamples := make([]sample, 0, n)
+	for i := 0; i < n-1; i++ {
+		name := fmt.Sprintf("test_metric_%d", i)
+		samples = append(samples,
+			sample{Name: name, Labels: map[string]string{
+				"drop_label": "x",
+			}, Value: float64(i)})
+		expectedSamples = append(expectedSamples,
+			sample{Name: name, Labels: map[string]string{
+				"external": "a",
+			}, Value: float64(i)})
+	}
+	i := n - 1
+	{
+		samples = append(samples,
+			sample{Name: fmt.Sprintf("test_metric_%d", i),
+				Labels: map[string]string{
+					"drop_metric": "true",
+				}, Value: float64(i)})
+	}
+
+	c := NewTestStorageClient()
+	c.expectSamples(expectedSamples)
+
+	cfg := config.DefaultQueueConfig
+	cfg.MaxShards = 1
+	m := NewQueueManager(nil, cfg,
+		model.LabelSet{
+			"external": "a",
+		},
+		[]*config.RelabelConfig{
+			{
+				Action: "labeldrop",
+				Regex:  config.MustNewRegexp("drop_label"),
+			},
+			{
+				SourceLabels: []model.LabelName{"drop_metric"},
+				Action:       "drop",
+				Regex:        config.MustNewRegexp("true"),
+			},
+		},
+		c, &DefaultStackdriverConfig)
+
+	for _, s := range samples {
+		m.Append(sampleToMetricFamily(s))
+	}
+	m.Start()
+	defer m.Stop()
+
+	c.waitForExpectedSamples(t)
+}
+
 func TestSampleDeliveryOrder(t *testing.T) {
 	ts := 10
 	n := config.DefaultQueueConfig.MaxSamplesPerSend * ts
@@ -136,12 +196,12 @@ func TestSampleDeliveryOrder(t *testing.T) {
 	samples := make([]sample, 0, n)
 	for i := 0; i < n; i++ {
 		name := fmt.Sprintf("test_metric_%d", i%ts)
-		samples = append(samples, sample{Name: name, Value: float64(i)})
+		samples = append(samples, sample{Name: name, Labels: map[string]string{}, Value: float64(i)})
 	}
 
 	c := NewTestStorageClient()
 	c.expectSamples(samples)
-	m := NewQueueManager(nil, config.DefaultQueueConfig, nil, c, &DefaultStackdriverConfig)
+	m := NewQueueManager(nil, config.DefaultQueueConfig, nil, nil, c, &DefaultStackdriverConfig)
 
 	// These should be received by the client.
 	for _, s := range samples {
@@ -163,11 +223,11 @@ func TestStoreEmptyRequest(t *testing.T) {
 	samples := make([]sample, 0, n)
 	for i := 0; i < n; i++ {
 		name := fmt.Sprintf("test_metric_%d", i%ts)
-		samples = append(samples, sample{Name: name, Value: float64(i)})
+		samples = append(samples, sample{Name: name, Labels: map[string]string{}, Value: float64(i)})
 	}
 
 	c := NewTestStorageClient()
-	m := NewQueueManager(nil, config.DefaultQueueConfig, nil, c, &DefaultStackdriverConfig)
+	m := NewQueueManager(nil, config.DefaultQueueConfig, nil, nil, c, &DefaultStackdriverConfig)
 
 	// These should be received by the client.
 	for _, s := range samples {
@@ -244,14 +304,14 @@ func TestSpawnNotMoreThanMaxConcurrentSendsGoroutines(t *testing.T) {
 	samples := make([]sample, 0, n)
 	for i := 0; i < n; i++ {
 		name := fmt.Sprintf("test_metric_%d", i)
-		samples = append(samples, sample{Name: name, Value: float64(i)})
+		samples = append(samples, sample{Name: name, Labels: map[string]string{}, Value: float64(i)})
 	}
 
 	c := NewTestBlockedStorageClient()
 	cfg := config.DefaultQueueConfig
 	cfg.MaxShards = 1
 	cfg.Capacity = n
-	m := NewQueueManager(nil, cfg, nil, c, &DefaultStackdriverConfig)
+	m := NewQueueManager(nil, cfg, nil, nil, c, &DefaultStackdriverConfig)
 
 	m.Start()
 
@@ -293,18 +353,24 @@ func TestSpawnNotMoreThanMaxConcurrentSendsGoroutines(t *testing.T) {
 }
 
 func sampleToMetricFamily(s sample) *retrieval.MetricFamily {
+	metricLabels := make([]*dto.LabelPair, 0)
+	metricLabels = append(metricLabels, &dto.LabelPair{
+		Name:  proto.String("_kubernetes_project_id_or_name"),
+		Value: proto.String("1234567890"),
+	})
+	for ln, lv := range s.Labels {
+		metricLabels = append(metricLabels, &dto.LabelPair{
+			Name:  proto.String(ln),
+			Value: proto.String(lv),
+		})
+	}
 	return &retrieval.MetricFamily{
 		MetricFamily: &dto.MetricFamily{
 			Name: proto.String(s.Name),
 			Type: dto.MetricType_GAUGE.Enum(),
 			Metric: []*dto.Metric{
 				&dto.Metric{
-					Label: []*dto.LabelPair{
-						{
-							Name:  proto.String("_kubernetes_project_id_or_name"),
-							Value: proto.String("1234567890"),
-						},
-					},
+					Label: metricLabels,
 					Gauge: &dto.Gauge{
 						Value: proto.Float64(s.Value),
 					},

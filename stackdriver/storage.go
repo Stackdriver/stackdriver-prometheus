@@ -101,6 +101,7 @@ func (s *Storage) ApplyConfig(conf *config.Config) error {
 			s.logger,
 			config.DefaultQueueConfig,
 			conf.GlobalConfig.ExternalLabels,
+			rwConf.WriteRelabelConfigs,
 			c,
 			s.cfg,
 		))
