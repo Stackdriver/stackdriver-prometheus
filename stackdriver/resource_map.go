@@ -25,52 +25,7 @@ const (
 )
 
 // TODO(jkohen): ensure these are sorted from more specific to less specific.
-var DefaultResourceMappings = []ResourceMap{
-	{
-		// This is just for testing, until the Kubernetes resource types are public.
-		Type: "gke_container",
-		LabelMap: map[string]string{
-			ProjectIdLabel:                   "project_id",
-			"_kubernetes_location":           "zone",
-			"_kubernetes_cluster_name":       "cluster_name",
-			"_kubernetes_namespace":          "namespace_id",
-			"_kubernetes_pod_name":           "pod_id",
-			"_kubernetes_pod_node_name":      "instance_id",
-			"_kubernetes_pod_container_name": "container_name",
-		},
-	},
-	{
-		Type: "k8s_container",
-		LabelMap: map[string]string{
-			ProjectIdLabel:                   "project_id",
-			"_kubernetes_location":           "location",
-			"_kubernetes_cluster_name":       "cluster_name",
-			"_kubernetes_namespace":          "namespace_name",
-			"_kubernetes_pod_name":           "pod_name",
-			"_kubernetes_pod_node_name":      "node_name",
-			"_kubernetes_pod_container_name": "container_name",
-		},
-	},
-	{
-		Type: "k8s_pod",
-		LabelMap: map[string]string{
-			ProjectIdLabel:              "project_id",
-			"_kubernetes_location":      "location",
-			"_kubernetes_cluster_name":  "cluster_name",
-			"_kubernetes_namespace":     "namespace_name",
-			"_kubernetes_pod_name":      "pod_name",
-			"_kubernetes_pod_node_name": "node_name",
-		},
-	},
-	{
-		Type: "k8s_node",
-		LabelMap: map[string]string{
-			ProjectIdLabel:             "project_id",
-			"_kubernetes_location":     "location",
-			"_kubernetes_cluster_name": "cluster_name",
-			"_kubernetes_node_name":    "node_name",
-		},
-	},
+var commonResourceMappings = []ResourceMap{
 	{
 		Type: "global",
 		LabelMap: map[string]string{
@@ -78,6 +33,61 @@ var DefaultResourceMappings = []ResourceMap{
 		},
 	},
 }
+
+// TODO(jkohen): ensure these are sorted from more specific to less specific.
+var DefaultResourceMappings = append(
+	[]ResourceMap{
+		{
+			// This is just for testing, until the Kubernetes resource types are public.
+			Type: "gke_container",
+			LabelMap: map[string]string{
+				ProjectIdLabel:                   "project_id",
+				"_kubernetes_location":           "zone",
+				"_kubernetes_cluster_name":       "cluster_name",
+				"_kubernetes_namespace":          "namespace_id",
+				"_kubernetes_pod_name":           "pod_id",
+				"_kubernetes_pod_node_name":      "instance_id",
+				"_kubernetes_pod_container_name": "container_name",
+			},
+		},
+	}, commonResourceMappings...)
+
+// TODO(jkohen): ensure these are sorted from more specific to less specific.
+var K8sResourceMappings = append(
+	[]ResourceMap{
+		{
+			Type: "k8s_container",
+			LabelMap: map[string]string{
+				ProjectIdLabel:                   "project_id",
+				"_kubernetes_location":           "location",
+				"_kubernetes_cluster_name":       "cluster_name",
+				"_kubernetes_namespace":          "namespace_name",
+				"_kubernetes_pod_name":           "pod_name",
+				"_kubernetes_pod_node_name":      "node_name",
+				"_kubernetes_pod_container_name": "container_name",
+			},
+		},
+		{
+			Type: "k8s_pod",
+			LabelMap: map[string]string{
+				ProjectIdLabel:              "project_id",
+				"_kubernetes_location":      "location",
+				"_kubernetes_cluster_name":  "cluster_name",
+				"_kubernetes_namespace":     "namespace_name",
+				"_kubernetes_pod_name":      "pod_name",
+				"_kubernetes_pod_node_name": "node_name",
+			},
+		},
+		{
+			Type: "k8s_node",
+			LabelMap: map[string]string{
+				ProjectIdLabel:             "project_id",
+				"_kubernetes_location":     "location",
+				"_kubernetes_cluster_name": "cluster_name",
+				"_kubernetes_node_name":    "node_name",
+			},
+		},
+	}, commonResourceMappings...)
 
 type ResourceMap struct {
 	// The name of the Stackdriver MonitoredResource.

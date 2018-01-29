@@ -149,7 +149,7 @@ type QueueManager struct {
 	client           StorageClient
 	queueName        string
 	logLimiter       *rate.Limiter
-	k8sResourceTypes bool
+	resourceMappings []ResourceMap
 
 	shardsMtx   sync.Mutex
 	shards      *shards
@@ -167,6 +167,10 @@ func NewQueueManager(logger log.Logger, cfg config.QueueConfig, externalLabels m
 	if logger == nil {
 		logger = log.NewNopLogger()
 	}
+	resourceMappings := DefaultResourceMappings
+	if sdCfg.K8sResourceTypes {
+		resourceMappings = K8sResourceMappings
+	}
 	t := &QueueManager{
 		logger:           logger,
 		cfg:              cfg,
@@ -174,7 +178,7 @@ func NewQueueManager(logger log.Logger, cfg config.QueueConfig, externalLabels m
 		relabelConfigs:   relabelConfigs,
 		client:           client,
 		queueName:        client.Name(),
-		k8sResourceTypes: sdCfg.K8sResourceTypes,
+		resourceMappings: resourceMappings,
 
 		logLimiter:  rate.NewLimiter(logRateLimit, logBurst),
 		numShards:   1,
@@ -473,7 +477,7 @@ func (s *shards) sendSamples(samples []*retrieval.MetricFamily) {
 // sendSamples to the remote storage with backoff for recoverable errors.
 func (s *shards) sendSamplesWithBackoff(samples []*retrieval.MetricFamily) {
 	backoff := s.qm.cfg.MinBackoff
-	translator := NewTranslator(s.qm.logger, metricsPrefix, DefaultResourceMappings, s.qm.k8sResourceTypes)
+	translator := NewTranslator(s.qm.logger, metricsPrefix, s.qm.resourceMappings)
 	for retries := s.qm.cfg.MaxRetries; retries > 0; retries-- {
 		begin := time.Now()
 		req := translator.ToCreateTimeSeriesRequest(samples)

@@ -181,7 +181,7 @@ var metrics = []*retrieval.MetricFamily{
 func TestToCreateTimeSeriesRequest(t *testing.T) {
 	const epsilon = float64(0.001)
 	output := &bytes.Buffer{}
-	translator := NewTranslator(log.NewLogfmtLogger(output), "metrics.prefix", testResourceMappings, false)
+	translator := NewTranslator(log.NewLogfmtLogger(output), "metrics.prefix", testResourceMappings)
 	request := translator.ToCreateTimeSeriesRequest(metrics)
 	if request == nil {
 		t.Fatalf("Failed with error %v", output.String())
@@ -315,7 +315,7 @@ func TestUnknownMonitoredResource(t *testing.T) {
 	}
 
 	output := &bytes.Buffer{}
-	translator := NewTranslator(log.NewLogfmtLogger(output), "metrics.prefix", resourceMappings, false)
+	translator := NewTranslator(log.NewLogfmtLogger(output), "metrics.prefix", resourceMappings)
 	request := translator.ToCreateTimeSeriesRequest(metrics)
 	if len(request.TimeSeries) > 0 {
 		t.Fatalf("expected empty request, but got %v", request)
@@ -347,7 +347,7 @@ func TestK8sResourceTypes(t *testing.T) {
 
 	const epsilon = float64(0.001)
 	output := &bytes.Buffer{}
-	translator := NewTranslator(log.NewLogfmtLogger(output), "metrics.prefix", testK8sResourceMappings, true)
+	translator := NewTranslator(log.NewLogfmtLogger(output), "metrics.prefix", testK8sResourceMappings)
 	request := translator.ToCreateTimeSeriesRequest(metrics)
 	if request == nil {
 		t.Fatalf("Failed with error %v", output.String())
@@ -400,7 +400,7 @@ func TestDropsInternalLabels(t *testing.T) {
 	}
 
 	output := &bytes.Buffer{}
-	translator := NewTranslator(log.NewLogfmtLogger(output), "metrics.prefix", testResourceMappings, false)
+	translator := NewTranslator(log.NewLogfmtLogger(output), "metrics.prefix", testResourceMappings)
 	request := translator.ToCreateTimeSeriesRequest(metrics)
 	if request == nil {
 		t.Fatalf("Failed with error %v", output.String())
@@ -461,7 +461,7 @@ func TestDropsMetricWithTooManyLabels(t *testing.T) {
 	}
 
 	output := &bytes.Buffer{}
-	translator := NewTranslator(log.NewLogfmtLogger(output), "metrics.prefix", testResourceMappings, false)
+	translator := NewTranslator(log.NewLogfmtLogger(output), "metrics.prefix", testResourceMappings)
 	request := translator.ToCreateTimeSeriesRequest(metrics)
 	if request == nil {
 		t.Fatalf("Failed with error %v", output.String())

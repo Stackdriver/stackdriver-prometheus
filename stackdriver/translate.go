@@ -51,17 +51,15 @@ func (e *unsupportedTypeError) Error() string {
 type Translator struct {
 	logger           log.Logger
 	metricsPrefix    string
-	k8sResourceTypes bool
 	resourceMappings []ResourceMap
 }
 
 // NewTranslator creates a new Translator.
-func NewTranslator(logger log.Logger, metricsPrefix string, resourceMappings []ResourceMap, k8sResourceTypes bool) *Translator {
+func NewTranslator(logger log.Logger, metricsPrefix string, resourceMappings []ResourceMap) *Translator {
 	return &Translator{
 		logger:           logger,
 		metricsPrefix:    metricsPrefix,
 		resourceMappings: resourceMappings,
-		k8sResourceTypes: k8sResourceTypes,
 	}
 }
 
@@ -107,15 +105,6 @@ func (t *Translator) translateFamily(family *retrieval.MetricFamily) ([]*monitor
 				"family", family.GetName(),
 				"metric", metric,
 				"err", err)
-			continue
-		}
-		// The new k8s MonitoredResource types are still behind a
-		// whitelist. Drop silently for now to avoid errors in the logs.
-		// TODO(jkohen): Remove once the whitelist goes away, or at
-		// least make this controlled by a flag.
-		if t.k8sResourceTypes && ts.Resource.Type == "gke_container" {
-			continue
-		} else if !t.k8sResourceTypes && strings.HasPrefix(ts.Resource.Type, "k8s") {
 			continue
 		}
 		tss = append(tss, ts)
