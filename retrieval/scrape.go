@@ -655,33 +655,18 @@ func (sl *scrapeLoop) append(b []byte, ts time.Time) (total, added int, err erro
 loop:
 	for name, metricFamily := range metricFamilies {
 		total++
-		metrics := []*dto.Metric{}
+		metricFamily.Metric = relabelMetrics(metricFamily.Metric, sl.sampleMutator)
+		// Drop family if we dropped all metrics.
+		if metricFamily.Metric == nil {
+			continue
+		}
 		resetTimes := []*int64{}
 		for _, metric := range metricFamily.Metric {
 			if metric.TimestampMs == nil {
 				metric.TimestampMs = proto.Int64(defTime)
 			}
-
-			var lset labels.Labels
-			labelPairsToLabels(metric.Label, &lset)
-
-			// Add target labels and relabeling and store the final label
-			// set.
-			lset = sl.sampleMutator(lset)
-			// The label set may be set to nil to indicate dropping.
-			if lset == nil {
-				continue
-			}
-
-			metric.Label = labelsToLabelPairs(lset)
-			metrics = append(metrics, metric)
 			resetTimes = append(resetTimes, resetTimeMs)
 		}
-		// Drop family if we dropped all metrics.
-		if len(metrics) == 0 {
-			continue
-		}
-		metricFamily.Metric = metrics
 		err = app.Add(&MetricFamily{metricFamily, resetTimes})
 		switch err {
 		case nil:
@@ -800,6 +785,29 @@ func (sl *scrapeLoop) addReportSample(app Appender, name string, t int64, v floa
 	default:
 		return err
 	}
+}
+
+// relabelMetrics returns null if the relabeling requested the metric to be dropped.
+func relabelMetrics(inputMetrics []*dto.Metric, mutator labelsMutator) []*dto.Metric {
+	metrics := []*dto.Metric{}
+	for _, metric := range inputMetrics {
+		var lset labels.Labels
+		labelPairsToLabels(metric.Label, &lset)
+
+		// Add target labels and relabeling and store the final label set.
+		lset = mutator(lset)
+		// The label set may be set to nil to indicate dropping.
+		if lset == nil {
+			continue
+		}
+
+		metric.Label = labelsToLabelPairs(lset)
+		metrics = append(metrics, metric)
+	}
+	if len(metrics) == 0 {
+		return nil
+	}
+	return metrics
 }
 
 func labelPairsToLabels(input []*dto.LabelPair, output *labels.Labels) {
