@@ -13,6 +13,7 @@ limitations under the License.
 package stackdriver
 
 import (
+	"errors"
 	"fmt"
 	"math"
 	"strings"
@@ -33,7 +34,10 @@ var supportedMetricTypes = map[dto.MetricType]bool{
 	dto.MetricType_HISTOGRAM: true,
 }
 
-const falseValueEpsilon = 0.001
+const (
+	falseValueEpsilon = 0.001
+	maxLabelCount     = 10
+)
 
 type unsupportedTypeError struct {
 	metricType dto.MetricType
@@ -97,7 +101,13 @@ func (t *Translator) translateFamily(family *retrieval.MetricFamily) ([]*monitor
 		startTime := timestamp.Time(*family.MetricResetTimestampMs[i])
 		ts, err := t.translateOne(family.GetName(), family.GetType(), metric, startTime)
 		if err != nil {
-			return nil, err
+			// Metrics are usually independent, so just drop this one.
+			level.Warn(t.logger).Log(
+				"msg", "error while processing metric",
+				"family", family.GetName(),
+				"metric", metric,
+				"err", err)
+			continue
 		}
 		// The new k8s MonitoredResource types are still behind a
 		// whitelist. Drop silently for now to avoid errors in the logs.
@@ -125,8 +135,7 @@ func (t *Translator) translateOne(name string,
 	start time.Time) (*monitoring.TimeSeries, error) {
 	monitoredResource := t.getMonitoredResource(metric)
 	if monitoredResource == nil {
-		return nil,
-			fmt.Errorf("cannot extract Stackdriver monitored resource from metric %v of family %s", metric, name)
+		return nil, errors.New("cannot extract Stackdriver monitored resource from metric")
 	}
 	interval := &monitoring.TimeInterval{
 		EndTime: timestamp.Time(metric.GetTimestampMs()).UTC().Format(time.RFC3339Nano),
@@ -144,9 +153,15 @@ func (t *Translator) translateOne(name string,
 	}
 	setValue(mType, valueType, metric, point)
 
+	tsLabels := getMetricLabels(metric.GetLabel())
+	if len(tsLabels) > maxLabelCount {
+		return nil, fmt.Errorf(
+			"dropping metric because it has more than %v labels, and Stackdriver would reject it",
+			maxLabelCount)
+	}
 	return &monitoring.TimeSeries{
 		Metric: &monitoring.Metric{
-			Labels: getMetricLabels(metric.GetLabel()),
+			Labels: tsLabels,
 			Type:   getMetricType(t.metricsPrefix, name),
 		},
 		Resource:   monitoredResource,
@@ -228,7 +243,9 @@ func convertToDistributionValue(h *dto.Histogram) *monitoring.Distribution {
 }
 
 // getMetricLabels returns a Stackdriver label map from the label.
-// By convention it excludes any Prometheus labels with "_" prefix.
+//
+// By convention it excludes any Prometheus labels with "_" prefix, which
+// includes the labels that correspond to Stackdriver resource labels.
 func getMetricLabels(labels []*dto.LabelPair) map[string]string {
 	metricLabels := map[string]string{}
 	for _, label := range labels {

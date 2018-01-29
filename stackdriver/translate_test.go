@@ -18,6 +18,7 @@ package stackdriver
 
 import (
 	"bytes"
+	"fmt"
 	"math"
 	"strings"
 	"testing"
@@ -424,4 +425,58 @@ func TestDropsInternalLabels(t *testing.T) {
 		assert.Equal(t, "x", value)
 	}
 	assert.Equal(t, float64(42), *(metric.Points[0].Value.DoubleValue))
+}
+
+func TestDropsMetricWithTooManyLabels(t *testing.T) {
+	metrics := []*retrieval.MetricFamily{
+		{
+			MetricFamily: &dto.MetricFamily{
+				Name: &testMetricName,
+				Type: &metricTypeCounter,
+				Help: &testMetricDescription,
+				Metric: []*dto.Metric{
+					{
+						Label:       []*dto.LabelPair{},
+						Counter:     &dto.Counter{Value: proto.Float64(1.0)},
+						TimestampMs: proto.Int64(1234568000432),
+					},
+					{
+						Counter:     &dto.Counter{Value: proto.Float64(2.0)},
+						TimestampMs: proto.Int64(1234568000432),
+					},
+				},
+			},
+			MetricResetTimestampMs: []*int64{
+				proto.Int64(1234567890431),
+				proto.Int64(1234567890432),
+			},
+		},
+	}
+	for i := 0; i <= maxLabelCount; i++ {
+		metrics[0].Metric[0].Label = append(metrics[0].Metric[0].Label,
+			&dto.LabelPair{
+				Name:  proto.String(fmt.Sprintf("l%d", i)),
+				Value: proto.String("v"),
+			})
+	}
+
+	output := &bytes.Buffer{}
+	translator := NewTranslator(log.NewLogfmtLogger(output), "metrics.prefix", testResourceMappings, false)
+	request := translator.ToCreateTimeSeriesRequest(metrics)
+	if request == nil {
+		t.Fatalf("Failed with error %v", output.String())
+	} else if output.Len() > 0 {
+		t.Logf("succeeded with messages %v", output.String())
+	}
+
+	// The first input metric should have been dropped because it contains
+	// too many labels. The second one should take its place.
+	metric := request.TimeSeries[0]
+	assert.Equal(t, "metrics.prefix/test_name", metric.Metric.Type)
+	assert.Equal(t, "DOUBLE", metric.ValueType)
+	assert.Equal(t, "CUMULATIVE", metric.MetricKind)
+
+	assert.Equal(t, 1, len(metric.Points))
+	assert.Equal(t, "2009-02-13T23:31:30.432Z", metric.Points[0].Interval.StartTime)
+	assert.Equal(t, float64(2), *(metric.Points[0].Value.DoubleValue))
 }
