@@ -103,7 +103,8 @@ func (c *TestStorageClient) Name() string {
 func TestSampleDelivery(t *testing.T) {
 	// Let's create an even number of send batches so we don't run into the
 	// batch timeout case.
-	n := config.DefaultQueueConfig.Capacity * 2
+	capacity := 100
+	n := capacity * 2
 
 	samples := make([]sample, 0, n)
 	for i := 0; i < n; i++ {
@@ -116,6 +117,7 @@ func TestSampleDelivery(t *testing.T) {
 
 	cfg := config.DefaultQueueConfig
 	cfg.MaxShards = 1
+	cfg.Capacity = capacity
 	m := NewQueueManager(nil, cfg, nil, nil, c, &DefaultStackdriverConfig)
 
 	// These should be received by the client.
@@ -134,7 +136,7 @@ func TestSampleDelivery(t *testing.T) {
 
 func TestRelabel(t *testing.T) {
 	// This will cause a flush right away.
-	n := config.DefaultQueueConfig.MaxSamplesPerSend
+	n := config.DefaultQueueConfig.MaxSamplesPerSend + 1
 
 	samples := make([]sample, 0, n)
 	expectedSamples := make([]sample, 0, n)
@@ -159,11 +161,13 @@ func TestRelabel(t *testing.T) {
 	}
 
 	c := NewTestStorageClient()
+	if len(expectedSamples) != config.DefaultQueueConfig.MaxSamplesPerSend {
+		// These should be equal, or the test will block waiting for the batch timeout.
+		t.Fatal("bug in test")
+	}
 	c.expectSamples(expectedSamples)
 
-	cfg := config.DefaultQueueConfig
-	cfg.MaxShards = 1
-	m := NewQueueManager(nil, cfg,
+	m := NewQueueManager(nil, config.DefaultQueueConfig,
 		model.LabelSet{
 			"external": "a",
 		},
