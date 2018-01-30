@@ -1,3 +1,5 @@
+# You need the cloud-admin role to apply this file.
+# On GKE try `kubectl apply -f rbac-setup.yaml --as=admin --as-group=system:masters`
 apiVersion: rbac.authorization.k8s.io/v1beta1
 kind: ClusterRole
 metadata:

@@ -33,7 +33,7 @@ items:
           app: prometheus
       spec:
         # Needed when using unmodified rbac-setup.yml
-        #serviceAccountName: prometheus
+        serviceAccountName: prometheus
         containers:
         - name: prometheus
           image: gcr.io/prometheus-to-sd/stackdriver-prometheus:master
