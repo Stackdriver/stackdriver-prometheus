@@ -206,7 +206,7 @@ func NewQueueManager(logger log.Logger, cfg config.QueueConfig, externalLabels m
 // sample on the floor if the queue is full.
 // Always returns nil.
 func (t *QueueManager) Append(sample *retrieval.MetricFamily) error {
-	metricFamily := proto.Clone(sample).(*retrieval.MetricFamily)
+	metricFamily := sample.Clone() // Make a copy because we'll modify its labels in-place.
 	metricFamily.Metric = t.relabelMetrics(metricFamily.Metric)
 	// Drop family if we dropped all metrics.
 	if metricFamily.Metric == nil {

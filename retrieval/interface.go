@@ -18,6 +18,7 @@ package retrieval
 import (
 	"errors"
 
+	"github.com/gogo/protobuf/proto"
 	dto "github.com/prometheus/client_model/go"
 )
 
@@ -40,6 +41,18 @@ type MetricFamily struct {
 	// the value is unknown.
 	// This is a *int64 to somewhat mimic the proto API used by dto.MetricFamily.
 	MetricResetTimestampMs []*int64
+}
+
+// Clone returns a new object that is a deep copy of the target object.
+func (f *MetricFamily) Clone() (o *MetricFamily) {
+	o = &MetricFamily{
+		MetricFamily:           proto.Clone(f.MetricFamily).(*dto.MetricFamily),
+		MetricResetTimestampMs: make([]*int64, len(f.MetricResetTimestampMs)),
+	}
+	for i, x := range f.MetricResetTimestampMs {
+		o.MetricResetTimestampMs[i] = proto.Int64(*x)
+	}
+	return
 }
 
 type Appender interface {
