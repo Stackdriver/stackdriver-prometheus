@@ -199,7 +199,6 @@ type limitAppender struct {
 
 func (app *limitAppender) Add(metricFamily *MetricFamily) error {
 	app.i += len(metricFamily.Metric)
-	fmt.Println(app.i, app.limit)
 	if app.i > app.limit {
 		return errSampleLimit
 	}
