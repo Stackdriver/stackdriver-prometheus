@@ -559,6 +559,10 @@ mainLoop:
 		scrapeErr := sl.scraper.scrape(scrapeCtx, buf)
 		cancel()
 
+		var (
+			total = 0
+			added = 0
+		)
 		if scrapeErr == nil {
 			b = buf.Bytes()
 			// NOTE: There were issues with misbehaving clients in the past
@@ -567,24 +571,22 @@ mainLoop:
 			if len(b) > 0 {
 				sl.lastScrapeSize = len(b)
 			}
+
+			var appErr error
+			total, added, appErr = sl.append(b, start)
+			if appErr != nil {
+				level.Warn(sl.l).Log("msg", "append failed", "err", appErr)
+				if scrapeErr == nil {
+					scrapeErr = appErr
+				}
+			}
+
+			sl.buffers.Put(b)
 		} else {
 			level.Debug(sl.l).Log("msg", "Scrape failed", "err", scrapeErr.Error())
 			if errc != nil {
 				errc <- scrapeErr
 			}
-		}
-
-		// A failed scrape is the same as an empty scrape,
-		// we still call sl.append to report metrics like "up".
-		total, added, appErr := sl.append(b, start)
-		if appErr != nil {
-			level.Warn(sl.l).Log("msg", "append failed", "err", appErr)
-		}
-
-		sl.buffers.Put(b)
-
-		if scrapeErr == nil {
-			scrapeErr = appErr
 		}
 
 		sl.report(start, time.Since(start), total, added, scrapeErr)
@@ -632,13 +634,19 @@ func (s samples) Less(i, j int) bool {
 
 func (sl *scrapeLoop) append(b []byte, ts time.Time) (total, added int, err error) {
 	var (
-		app                         = sl.appender()
 		parser                      = expfmt.TextParser{}
 		metricFamilies, parserError = parser.TextToMetricFamilies(strings.NewReader(string(b)))
 		defTime                     = timestamp.FromTime(ts)
-		numOutOfOrder               = 0
-		numDuplicates               = 0
-		numOutOfBounds              = 0
+	)
+	if parserError != nil {
+		return total, added, parserError
+	}
+
+	var (
+		app            = sl.appender()
+		numOutOfOrder  = 0
+		numDuplicates  = 0
+		numOutOfBounds = 0
 	)
 	var sampleLimitErr error
 	var resetTimeMs *int64
@@ -697,9 +705,6 @@ loop:
 			break loop
 		}
 		added++
-	}
-	if err == nil {
-		err = parserError
 	}
 	if sampleLimitErr != nil {
 		// We only want to increment this once per scrape, so this is Inc'd outside the loop.
