@@ -83,7 +83,7 @@ docker: build
 	@echo ">> building docker image"
 	@docker build -t "$(DOCKER_IMAGE_NAME):$(DOCKER_IMAGE_TAG)" .
 
-push: docker
+push: docker test
 	@echo ">> pushing docker image"
 	gcloud docker -- push "$(DOCKER_IMAGE_NAME):$(DOCKER_IMAGE_TAG)"
 
