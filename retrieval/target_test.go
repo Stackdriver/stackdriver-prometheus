@@ -16,6 +16,7 @@ package retrieval
 import (
 	"crypto/tls"
 	"crypto/x509"
+	"errors"
 	"fmt"
 	"io/ioutil"
 	"net/http"
@@ -125,13 +126,76 @@ func TestTargetURL(t *testing.T) {
 	}
 }
 
+func TestReport(t *testing.T) {
+	target := newTestTarget("example.com:80", 0, labels.FromStrings(
+		"label", "0",
+	))
+	// Before first report call.
+	if !target.LastScrape().IsZero() {
+		t.Errorf("expected LastScrape to return uninitialized time, but returned %v",
+			target.LastScrape())
+	}
+	if target.LastError() != nil {
+		t.Errorf("expected LastError to return nil, but returned %v",
+			target.LastError())
+	}
+	if target.Health() != HealthUnknown {
+		t.Errorf("expected Health to return %v, but returned %v",
+			HealthUnknown, target.Health())
+	}
+	if target.SuccessfullyScraped() {
+		t.Errorf("expected SuccessfullyScraped to return false, but returned %v",
+			target.SuccessfullyScraped())
+	}
+	// Successful report call.
+	startTime := time.Now()
+	unusedDuration, _ := time.ParseDuration("0")
+	target.report(startTime, unusedDuration, nil)
+	if target.LastScrape() != startTime {
+		t.Errorf("expected LastScrape to return %v, but returned %v",
+			startTime, target.LastScrape())
+	}
+	if target.LastError() != nil {
+		t.Errorf("expected LastError to return nil, but returned %v",
+			target.LastError())
+	}
+	if target.Health() != HealthGood {
+		t.Errorf("expected Health to return %v, but returned %v",
+			HealthGood, target.Health())
+	}
+	if !target.SuccessfullyScraped() {
+		t.Errorf("expected SuccessfullyScraped to return true, but returned %v",
+			target.SuccessfullyScraped())
+	}
+	startTime = time.Now()
+	scrapeErr := errors.New("foo")
+	target.report(startTime, unusedDuration, scrapeErr)
+	// Failed report call.
+	if target.LastScrape() != startTime {
+		t.Errorf("expected LastScrape to return %v, but returned %v",
+			startTime, target.LastScrape())
+	}
+	if target.LastError() == nil {
+		t.Errorf("expected LastError to return %v, but returned %v",
+			scrapeErr, target.LastError())
+	}
+	if target.Health() != HealthBad {
+		t.Errorf("expected Health to return %v, but returned %v",
+			HealthBad, target.Health())
+	}
+	if !target.SuccessfullyScraped() {
+		t.Errorf("expected SuccessfullyScraped to return true, but returned %v",
+			target.SuccessfullyScraped())
+	}
+}
+
 func newTestTarget(targetURL string, deadline time.Duration, lbls labels.Labels) *Target {
 	lb := labels.NewBuilder(lbls)
 	lb.Set(model.SchemeLabel, "http")
 	lb.Set(model.AddressLabel, strings.TrimPrefix(targetURL, "http://"))
 	lb.Set(model.MetricsPathLabel, "/metrics")
 
-	return &Target{labels: lb.Labels()}
+	return NewTarget(lb.Labels(), lb.Labels(), url.Values{})
 }
 
 func TestNewHTTPBearerToken(t *testing.T) {

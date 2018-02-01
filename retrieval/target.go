@@ -50,10 +50,11 @@ type Target struct {
 	// Additional URL parmeters that are part of the target URL.
 	params url.Values
 
-	mtx        sync.RWMutex
-	lastError  error
-	lastScrape time.Time
-	health     TargetHealth
+	mtx                 sync.RWMutex
+	lastError           error
+	lastScrape          time.Time
+	health              TargetHealth
+	successfullyScraped bool
 }
 
 // NewTarget creates a reasonably configured target for querying.
@@ -148,6 +149,7 @@ func (t *Target) report(start time.Time, dur time.Duration, err error) {
 
 	if err == nil {
 		t.health = HealthGood
+		t.successfullyScraped = true
 	} else {
 		t.health = HealthBad
 	}
@@ -170,6 +172,16 @@ func (t *Target) LastScrape() time.Time {
 	defer t.mtx.RUnlock()
 
 	return t.lastScrape
+}
+
+// SuccessfullyScraped returns whether there has been a successful scrape. This
+// function will return true even if there have been failed scrapes, as long as
+// there has been at least one successful one.
+func (t *Target) SuccessfullyScraped() bool {
+	t.mtx.RLock()
+	defer t.mtx.RUnlock()
+
+	return t.successfullyScraped
 }
 
 // Health returns the last known health state of the target.
