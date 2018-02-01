@@ -796,8 +796,7 @@ func (sl *scrapeLoop) addReportSample(app Appender, name string, t int64, v floa
 func relabelMetrics(inputMetrics []*dto.Metric, mutator labelsMutator) []*dto.Metric {
 	metrics := []*dto.Metric{}
 	for _, metric := range inputMetrics {
-		var lset labels.Labels
-		labelPairsToLabels(metric.Label, &lset)
+		lset := labelPairsToLabels(metric.Label)
 
 		// Add target labels and relabeling and store the final label set.
 		lset = mutator(lset)
@@ -815,14 +814,15 @@ func relabelMetrics(inputMetrics []*dto.Metric, mutator labelsMutator) []*dto.Me
 	return metrics
 }
 
-func labelPairsToLabels(input []*dto.LabelPair, output *labels.Labels) {
-	*output = make(labels.Labels, 0, len(input))
+func labelPairsToLabels(input []*dto.LabelPair) (output labels.Labels) {
+	output = make(labels.Labels, 0, len(input))
 	for _, label := range input {
-		*output = append(*output, labels.Label{
+		output = append(output, labels.Label{
 			Name:  label.GetName(),
 			Value: label.GetValue(),
 		})
 	}
+	return
 }
 
 func labelsToLabelPairs(lset labels.Labels) []*dto.LabelPair {
