@@ -168,6 +168,7 @@ func newScrapePool(cfg *config.ScrapeConfig, app Appendable, logger log.Logger) 
 		return newScrapeLoop(
 			ctx,
 			s,
+			t,
 			log.With(logger, "target", t),
 			buffers,
 			func(l labels.Labels) labels.Labels { return sp.mutateSampleLabels(l, t) },
@@ -471,6 +472,7 @@ type loop interface {
 
 type scrapeLoop struct {
 	scraper        scraper
+	resetPointMap  resetPointMapper
 	l              log.Logger
 	lastScrapeSize int
 	buffers        *pool.BytesPool
@@ -487,6 +489,7 @@ type scrapeLoop struct {
 
 func newScrapeLoop(ctx context.Context,
 	sc scraper,
+	resetPointMap resetPointMapper,
 	l log.Logger,
 	buffers *pool.BytesPool,
 	sampleMutator labelsMutator,
@@ -501,6 +504,7 @@ func newScrapeLoop(ctx context.Context,
 	}
 	sl := &scrapeLoop{
 		scraper:             sc,
+		resetPointMap:       resetPointMap,
 		buffers:             buffers,
 		appender:            appender,
 		sampleMutator:       sampleMutator,
@@ -649,17 +653,16 @@ func (sl *scrapeLoop) append(b []byte, ts time.Time) (total, added int, err erro
 		numOutOfBounds = 0
 	)
 	var sampleLimitErr error
-	var resetTimeMs *int64
-
-	if resetTime, err := getResetTime(metricFamilies); err != nil {
-		level.Error(sl.l).Log("msg", "extract process start time", "err", err)
-		// Continue with the default resetTime.
-		resetTimeMs = proto.Int64(NoTimestamp)
+	var processResetTime time.Time
+	if processResetTime = getResetTime(metricFamilies); processResetTime.IsZero() {
+		level.Error(sl.l).Log("msg", "missing process_start_time_seconds; reset timestamps may be inaccurate")
+		// Continue with the default processResetTime.
+		processResetTime = timestamp.Time(NoTimestamp)
 	} else {
-		resetTimeMs = proto.Int64(timestamp.FromTime(resetTime))
-		level.Debug(sl.l).Log("msg", "extracted process start time", "time", resetTime)
+		level.Debug(sl.l).Log("msg", "extracted process start time", "time", processResetTime)
 	}
 
+	extractor := newPointExtractor(sl.resetPointMap, processResetTime)
 loop:
 	for name, metricFamily := range metricFamilies {
 		total++
@@ -668,13 +671,19 @@ loop:
 		if metricFamily.Metric == nil {
 			continue
 		}
-		resetTimes := []*int64{}
+		metrics := []*dto.Metric{}
+		resetTimes := []int64{}
 		for _, metric := range metricFamily.Metric {
 			if metric.TimestampMs == nil {
 				metric.TimestampMs = proto.Int64(defTime)
 			}
-			resetTimes = append(resetTimes, resetTimeMs)
+			if emit, resetTime := extractor.UpdateValue(metricFamily, metric); emit {
+				metrics = append(metrics, metric)
+				resetTimeMs := timestamp.FromTime(resetTime)
+				resetTimes = append(resetTimes, resetTimeMs)
+			}
 		}
+		metricFamily.Metric = metrics
 		err = app.Add(&MetricFamily{metricFamily, resetTimes})
 		switch err {
 		case nil:
@@ -781,7 +790,7 @@ func (sl *scrapeLoop) addReportSample(app Appender, name string, t int64, v floa
 			},
 		},
 	}
-	err := app.Add(&MetricFamily{metricFamily, []*int64{proto.Int64(NoTimestamp)}})
+	err := app.Add(&MetricFamily{metricFamily, []int64{NoTimestamp}})
 	switch err {
 	case nil:
 		return nil
@@ -836,7 +845,7 @@ func labelsToLabelPairs(lset labels.Labels) []*dto.LabelPair {
 	return labelPairs
 }
 
-func getResetTime(metrics map[string]*dto.MetricFamily) (time.Time, error) {
+func getResetTime(metrics map[string]*dto.MetricFamily) time.Time {
 	// For cumulative metrics we need to know process start time.
 	if family, ok := metrics[processStartTimeMetricName]; ok {
 		if family.GetType() == dto.MetricType_GAUGE &&
@@ -845,10 +854,49 @@ func getResetTime(metrics map[string]*dto.MetricFamily) (time.Time, error) {
 			value := family.Metric[0].Gauge.GetValue()
 			startSeconds := math.Trunc(value)
 			startNanos := 1000000000 * (value - startSeconds)
-			return time.Unix(int64(startSeconds), int64(startNanos)), nil
+			return time.Unix(int64(startSeconds), int64(startNanos))
 		}
 	}
-	return time.Time{},
-		fmt.Errorf("metric %s invalid or not defined, cumulative will be inaccurate",
-			processStartTimeMetricName)
+	return time.Time{}
+}
+
+type pointExtractor struct {
+	resetPointMap    resetPointMapper
+	firstScrape      bool
+	processStartTime time.Time
+}
+
+// newPointExtractor returns a new PointExtractor. A new PointExtractor should
+// be used for each independent scrape. On the other hand, the resetPointMap
+// should match the life cycle of the target as accurately as possible (as
+// opposed to the scrapeLoop).
+func newPointExtractor(resetPointMap resetPointMapper, processStartTime time.Time) (mutator *pointExtractor) {
+	return &pointExtractor{
+		resetPointMap:    resetPointMap,
+		firstScrape:      resetPointMap.HasResetPoints(),
+		processStartTime: processStartTime,
+	}
+}
+
+// getPoint returns the point within the given Metric. In some cases it may
+// return nil, indicating that no Point should be emitted. E.g., when the reset
+// timestamp is unknown.
+func (m *pointExtractor) UpdateValue(family *dto.MetricFamily, metric *dto.Metric) (
+	emit bool, resetTimestamp time.Time) {
+	// key := NewResetPointKey(
+	// 	family.GetName(), labelPairsToLabels(metric.Label), family.GetType())
+	// resetPoint = sl.resetPointMap.GetResetPoint(key)
+	updateValue(Point{}, metric)
+	emit = true
+	resetTimestamp = m.processStartTime
+	return
+}
+
+func updateValue(resetPoint Point, metric *dto.Metric) {
+	// TODO(jkohen): the proper implementation needs to substract resetPoint.
+	if resetPoint.Counter != nil {
+		metric.Counter = resetPoint.Counter
+	} else if resetPoint.Histogram != nil {
+		metric.Histogram = resetPoint.Histogram
+	}
 }

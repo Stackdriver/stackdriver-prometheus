@@ -43,6 +43,23 @@ import (
 const processStartTimeSecondsText = "# TYPE process_start_time_seconds gauge\n" +
 	"process_start_time_seconds 1234567890.4321 1234568000432\n"
 
+// Implements resetPointMap.
+type testResetPointMap struct {
+}
+
+func (m *testResetPointMap) GetResetPoint(key ResetPointKey) (point *Point) {
+	value := dto.Counter{Value: proto.Float64(1)}
+	return &Point{Timestamp: time.Time{}, Counter: &value}
+}
+
+func (m *testResetPointMap) AddResetPoint(key ResetPointKey, point Point) {
+}
+
+func (m *testResetPointMap) HasResetPoints() bool {
+	// If always false, no points will be written.
+	return true
+}
+
 func makeProcessStartTimeMetric() *MetricFamily {
 	return &MetricFamily{
 		MetricFamily: &dto.MetricFamily{
@@ -55,8 +72,8 @@ func makeProcessStartTimeMetric() *MetricFamily {
 				},
 			},
 		},
-		MetricResetTimestampMs: []*int64{
-			proto.Int64(1234567890432),
+		MetricResetTimestampMs: []int64{
+			1234567890432,
 		},
 	}
 }
@@ -286,7 +303,7 @@ func TestScrapeLoopStopBeforeRun(t *testing.T) {
 	scraper := &testScraper{}
 
 	sl := newScrapeLoop(context.Background(),
-		scraper,
+		scraper, &testResetPointMap{},
 		nil, nil,
 		nopMutator,
 		nopMutator,
@@ -348,7 +365,7 @@ func TestScrapeLoopStop(t *testing.T) {
 	defer close(signal)
 
 	sl := newScrapeLoop(context.Background(),
-		scraper,
+		scraper, &testResetPointMap{},
 		nil, nil,
 		nopMutator,
 		nopMutator,
@@ -408,7 +425,7 @@ func TestScrapeLoopRun(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	sl := newScrapeLoop(ctx,
-		scraper,
+		scraper, &testResetPointMap{},
 		nil, nil,
 		nopMutator,
 		nopMutator,
@@ -452,7 +469,7 @@ func TestScrapeLoopRun(t *testing.T) {
 
 	ctx, cancel = context.WithCancel(context.Background())
 	sl = newScrapeLoop(ctx,
-		scraper,
+		scraper, &testResetPointMap{},
 		nil, nil,
 		nopMutator,
 		nopMutator,
@@ -493,7 +510,8 @@ func TestScrapeLoopAppend(t *testing.T) {
 	app := &collectResultAppender{}
 
 	sl := newScrapeLoop(context.Background(),
-		nil, nil, nil,
+		nil, &testResetPointMap{},
+		nil, nil,
 		nopMutator,
 		nopMutator,
 		func() Appender { return app },
@@ -507,8 +525,11 @@ func TestScrapeLoopAppend(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Unexpected append error: %s", err)
 	}
-	// DeepEqual will report NaNs as being different, so replace with a different value.
 	result := app.Sorted()
+	if len(result) < 3 || len(result[1].Metric) < 1 {
+		t.Fatalf("expected 3 metrics; got %v", result)
+	}
+	// DeepEqual will report NaNs as being different, so replace with a different value.
 	result[1].Metric[0].Untyped.Value = proto.Float64(42)
 	want := []*MetricFamily{
 		makeProcessStartTimeMetric(),
@@ -525,7 +546,8 @@ func TestScrapeLoopAppendMissingProcessStartTime(t *testing.T) {
 	app := &collectResultAppender{}
 
 	sl := newScrapeLoop(context.Background(),
-		nil, nil, nil,
+		nil, &testResetPointMap{},
+		nil, nil,
 		nopMutator,
 		nopMutator,
 		func() Appender { return app },
@@ -544,8 +566,8 @@ func TestScrapeLoopAppendMissingProcessStartTime(t *testing.T) {
 	}
 	// Unset the reset timestamp, because we don't pass processStartTimeMetricName in the input.
 	for _, family := range want {
-		for _, resetTimestampMs := range family.MetricResetTimestampMs {
-			*resetTimestampMs = NoTimestamp
+		for i, _ := range family.MetricResetTimestampMs {
+			family.MetricResetTimestampMs[i] = NoTimestamp
 		}
 	}
 	sort.Sort(ByName(want))
@@ -558,7 +580,8 @@ func TestScrapeLoopMutator(t *testing.T) {
 	app := &collectResultAppender{}
 
 	sl := newScrapeLoop(context.Background(),
-		nil, nil, nil,
+		nil, &testResetPointMap{},
+		nil, nil,
 		func(lset labels.Labels) labels.Labels {
 			lb := labels.NewBuilder(lset)
 			lb.Set("new_label", "foo")
@@ -594,7 +617,8 @@ func TestScrapeLoopMutatorDeletesMetric(t *testing.T) {
 	app := &collectResultAppender{}
 
 	sl := newScrapeLoop(context.Background(),
-		nil, nil, nil,
+		nil, &testResetPointMap{},
+		nil, nil,
 		func(lset labels.Labels) labels.Labels {
 			var lb labels.Labels
 			for _, label := range lset {
@@ -658,9 +682,9 @@ func TestScrapeLoopMutatorDeletesMetric(t *testing.T) {
 					},
 				},
 			},
-			MetricResetTimestampMs: []*int64{
-				proto.Int64(1234567890432),
-				proto.Int64(1234567890432),
+			MetricResetTimestampMs: []int64{
+				1234567890432,
+				1234567890432,
 			},
 		},
 	}
@@ -675,7 +699,8 @@ func TestScrapeLoopAppendSampleLimit(t *testing.T) {
 	app := &limitAppender{Appender: resApp, limit: 1}
 
 	sl := newScrapeLoop(context.Background(),
-		nil, nil, nil,
+		nil, &testResetPointMap{},
+		nil, nil,
 		nopMutator,
 		nopMutator,
 		func() Appender { return app },
@@ -722,7 +747,8 @@ func TestScrapeLoopAppendSampleLimit(t *testing.T) {
 func TestScrapeLoopAppendNoStalenessIfTimestamp(t *testing.T) {
 	app := &collectResultAppender{}
 	sl := newScrapeLoop(context.Background(),
-		nil, nil, nil,
+		nil, &testResetPointMap{},
+		nil, nil,
 		nopMutator,
 		nopMutator,
 		func() Appender { return app },
@@ -759,7 +785,7 @@ func TestScrapeLoopRunReportsTargetDownOnScrapeError(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	sl := newScrapeLoop(ctx,
-		scraper,
+		scraper, &testResetPointMap{},
 		nil, nil,
 		nopMutator,
 		nopMutator,
@@ -794,7 +820,7 @@ func TestScrapeLoopRunReportsTargetDownOnInvalidUTF8(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	sl := newScrapeLoop(ctx,
-		scraper,
+		scraper, &testResetPointMap{},
 		nil, nil,
 		nopMutator,
 		nopMutator,
@@ -842,7 +868,7 @@ func TestScrapeLoopAppendGracefullyIfAmendOrOutOfOrderOrOutOfBounds(t *testing.T
 	app := &errorAppender{}
 
 	sl := newScrapeLoop(context.Background(),
-		nil,
+		nil, &testResetPointMap{},
 		nil, nil,
 		nopMutator,
 		nopMutator,
@@ -872,7 +898,7 @@ func TestScrapeLoopAppendGracefullyIfAmendOrOutOfOrderOrOutOfBounds(t *testing.T
 func TestScrapeLoopOutOfBoundsTimeError(t *testing.T) {
 	app := &collectResultAppender{}
 	sl := newScrapeLoop(context.Background(),
-		nil,
+		nil, &testResetPointMap{},
 		nil, nil,
 		nopMutator,
 		nopMutator,
@@ -1030,6 +1056,9 @@ func TestTargetScrapeScrapeNotFound(t *testing.T) {
 	}
 }
 
+func TestPointExtractor(t *testing.T) {
+}
+
 // testScraper implements the scraper interface and allows setting values
 // returned by its methods. It also allows setting a custom scrape function.
 type testScraper struct {
@@ -1075,8 +1104,8 @@ func untypedFromTriplet(name string, t int64, v float64) *MetricFamily {
 				},
 			},
 		},
-		MetricResetTimestampMs: []*int64{
-			proto.Int64(1234567890432),
+		MetricResetTimestampMs: []int64{
+			1234567890432,
 		},
 	}
 }

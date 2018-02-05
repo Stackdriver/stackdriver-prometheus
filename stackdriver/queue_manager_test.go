@@ -243,8 +243,8 @@ func TestStoreEmptyRequest(t *testing.T) {
 					&dto.Metric{},
 				},
 			},
-			MetricResetTimestampMs: []*int64{
-				proto.Int64(1234567890000),
+			MetricResetTimestampMs: []int64{
+				1234567890000,
 			},
 		})
 	}
@@ -381,8 +381,8 @@ func sampleToMetricFamily(s sample) *retrieval.MetricFamily {
 				},
 			},
 		},
-		MetricResetTimestampMs: []*int64{
-			proto.Int64(1234567890000),
+		MetricResetTimestampMs: []int64{
+			1234567890000,
 		},
 	}
 }

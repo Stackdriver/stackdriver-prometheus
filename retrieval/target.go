@@ -55,6 +55,7 @@ type Target struct {
 	lastScrape          time.Time
 	health              TargetHealth
 	successfullyScraped bool
+	resetPoints         map[ResetPointKey]Point
 }
 
 // NewTarget creates a reasonably configured target for querying.
@@ -64,6 +65,7 @@ func NewTarget(labels, discoveredLabels labels.Labels, params url.Values) *Targe
 		discoveredLabels: discoveredLabels,
 		params:           params,
 		health:           HealthUnknown,
+		resetPoints:      map[ResetPointKey]Point{},
 	}
 }
 

@@ -96,7 +96,7 @@ func (t *Translator) translateFamily(family *retrieval.MetricFamily) ([]*monitor
 		return tss, &unsupportedTypeError{family.GetType()}
 	}
 	for i, metric := range family.GetMetric() {
-		startTime := timestamp.Time(*family.MetricResetTimestampMs[i])
+		startTime := timestamp.Time(family.MetricResetTimestampMs[i])
 		ts, err := t.translateOne(family.GetName(), family.GetType(), metric, startTime)
 		if err != nil {
 			// Metrics are usually independent, so just drop this one.

@@ -87,9 +87,9 @@ var metrics = []*retrieval.MetricFamily{
 				},
 			},
 		},
-		MetricResetTimestampMs: []*int64{
-			proto.Int64(1234567890432),
-			proto.Int64(1234567890433),
+		MetricResetTimestampMs: []int64{
+			1234567890432,
+			1234567890433,
 		},
 	},
 	{
@@ -119,9 +119,9 @@ var metrics = []*retrieval.MetricFamily{
 				},
 			},
 		},
-		MetricResetTimestampMs: []*int64{
-			proto.Int64(1234567890432),
-			proto.Int64(1234567890432),
+		MetricResetTimestampMs: []int64{
+			1234567890432,
+			1234567890432,
 		},
 	},
 	{
@@ -135,8 +135,8 @@ var metrics = []*retrieval.MetricFamily{
 				},
 			},
 		},
-		MetricResetTimestampMs: []*int64{
-			proto.Int64(1234567890432),
+		MetricResetTimestampMs: []int64{
+			1234567890432,
 		},
 	},
 	{
@@ -172,8 +172,8 @@ var metrics = []*retrieval.MetricFamily{
 				},
 			},
 		},
-		MetricResetTimestampMs: []*int64{
-			proto.Int64(1234567890432),
+		MetricResetTimestampMs: []int64{
+			1234567890432,
 		},
 	},
 }
@@ -308,8 +308,8 @@ func TestUnknownMonitoredResource(t *testing.T) {
 					},
 				},
 			},
-			MetricResetTimestampMs: []*int64{
-				proto.Int64(1234567890432),
+			MetricResetTimestampMs: []int64{
+				1234567890432,
 			},
 		},
 	}
@@ -339,8 +339,8 @@ func TestK8sResourceTypes(t *testing.T) {
 					},
 				},
 			},
-			MetricResetTimestampMs: []*int64{
-				proto.Int64(1234567890432),
+			MetricResetTimestampMs: []int64{
+				1234567890432,
 			},
 		},
 	}
@@ -393,8 +393,8 @@ func TestDropsInternalLabels(t *testing.T) {
 					},
 				},
 			},
-			MetricResetTimestampMs: []*int64{
-				proto.Int64(1234567890432),
+			MetricResetTimestampMs: []int64{
+				1234567890432,
 			},
 		},
 	}
@@ -446,9 +446,9 @@ func TestDropsMetricWithTooManyLabels(t *testing.T) {
 					},
 				},
 			},
-			MetricResetTimestampMs: []*int64{
-				proto.Int64(1234567890431),
-				proto.Int64(1234567890432),
+			MetricResetTimestampMs: []int64{
+				1234567890431,
+				1234567890432,
 			},
 		},
 	}
