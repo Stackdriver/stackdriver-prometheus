@@ -16,7 +16,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gogo/protobuf/proto"
 	dto "github.com/prometheus/client_model/go"
 	"github.com/prometheus/prometheus/pkg/labels"
 )
@@ -66,9 +65,8 @@ func TestTargetResetPoint(t *testing.T) {
 			t.Fatalf("expected nil, got %v", result)
 		}
 	}
-	value := dto.Counter{Value: proto.Float64(123)}
 	timestamp := time.Now()
-	point := Point{Timestamp: timestamp, Counter: &value}
+	point := Point{Timestamp: timestamp, ResetValue: &PointValue{Counter: 123}}
 	target.AddResetPoint(key, point)
 	{
 		result := target.GetResetPoint(key)

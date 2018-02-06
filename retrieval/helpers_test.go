@@ -57,3 +57,7 @@ func (a *collectResultAppender) Sorted() []*MetricFamily {
 	sort.Sort(ByName(tmp))
 	return tmp
 }
+
+func (a *collectResultAppender) Reset() {
+	a.result = nil
+}

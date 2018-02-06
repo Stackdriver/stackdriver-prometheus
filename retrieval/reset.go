@@ -23,11 +23,16 @@ import (
 
 type ResetPointKey uint64
 
-type Point struct {
-	Timestamp time.Time
+type PointValue struct {
 	// Only one of the following fields may be set.
-	Counter   *dto.Counter
+	Counter   float64
 	Histogram *dto.Histogram
+}
+
+type Point struct {
+	Timestamp  time.Time
+	ResetValue *PointValue
+	LastValue  *PointValue
 }
 
 type resetPointMapper interface {

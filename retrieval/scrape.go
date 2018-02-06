@@ -684,6 +684,9 @@ loop:
 			}
 		}
 		metricFamily.Metric = metrics
+		if len(metricFamily.Metric) == 0 {
+			continue
+		}
 		err = app.Add(&MetricFamily{metricFamily, resetTimes})
 		switch err {
 		case nil:
@@ -873,7 +876,7 @@ type pointExtractor struct {
 func newPointExtractor(resetPointMap resetPointMapper, processStartTime time.Time) (mutator *pointExtractor) {
 	return &pointExtractor{
 		resetPointMap:    resetPointMap,
-		firstScrape:      resetPointMap.HasResetPoints(),
+		firstScrape:      !resetPointMap.HasResetPoints(),
 		processStartTime: processStartTime,
 	}
 }
@@ -883,20 +886,71 @@ func newPointExtractor(resetPointMap resetPointMapper, processStartTime time.Tim
 // timestamp is unknown.
 func (m *pointExtractor) UpdateValue(family *dto.MetricFamily, metric *dto.Metric) (
 	emit bool, resetTimestamp time.Time) {
-	// key := NewResetPointKey(
-	// 	family.GetName(), labelPairsToLabels(metric.Label), family.GetType())
-	// resetPoint = sl.resetPointMap.GetResetPoint(key)
-	updateValue(Point{}, metric)
+	if !ResetPointCompatible(family.GetType()) {
+		emit = true
+		resetTimestamp = timestamp.Time(NoTimestamp)
+		return
+	}
+	key := NewResetPointKey(
+		family.GetName(), labelPairsToLabels(metric.Label), family.GetType())
+	value := valueFromMetric(metric)
+	if m.firstScrape {
+		if timestamp.FromTime(m.processStartTime) == NoTimestamp {
+			// Reset time unknown, use the first point as the reset point.
+			m.resetPointMap.AddResetPoint(key, Point{
+				Timestamp:  timestamp.Time(metric.GetTimestampMs()),
+				ResetValue: value,
+				LastValue:  value,
+			})
+			emit = false
+			return
+		} else {
+			// Reset time from process restart time, use that as the reset point.
+			m.resetPointMap.AddResetPoint(key,
+				Point{Timestamp: m.processStartTime, LastValue: value})
+		}
+	}
+	resetPoint := m.resetPointMap.GetResetPoint(key)
+	if resetPoint == nil ||
+		(resetPoint.LastValue != nil && valueReset(metric, *resetPoint.LastValue)) {
+
+		// New time series or value decreased, use the point itself as the reset point.
+		resetPoint = &Point{Timestamp: timestamp.Time(metric.GetTimestampMs())}
+	}
+	resetPoint.LastValue = value
+	m.resetPointMap.AddResetPoint(key, *resetPoint)
+	if resetPoint.ResetValue != nil {
+		substractResetValue(*resetPoint.ResetValue, metric)
+	}
 	emit = true
-	resetTimestamp = m.processStartTime
+	resetTimestamp = resetPoint.Timestamp
 	return
 }
 
-func updateValue(resetPoint Point, metric *dto.Metric) {
-	// TODO(jkohen): the proper implementation needs to substract resetPoint.
-	if resetPoint.Counter != nil {
-		metric.Counter = resetPoint.Counter
-	} else if resetPoint.Histogram != nil {
-		metric.Histogram = resetPoint.Histogram
+func valueFromMetric(metric *dto.Metric) *PointValue {
+	if metric.Counter != nil {
+		return &PointValue{Counter: metric.Counter.GetValue()}
+	} else if metric.Histogram != nil {
+		return &PointValue{Histogram: metric.Histogram}
+	}
+	return nil
+}
+
+func valueReset(metric *dto.Metric, ref PointValue) bool {
+	if metric.Counter != nil {
+		return metric.Counter.GetValue() < ref.Counter
+	} else if metric.Histogram != nil {
+		// TODO(jkohen): implement
+	}
+	return false
+}
+
+func substractResetValue(resetValue PointValue, metric *dto.Metric) {
+	if resetValue.Counter > 0 {
+		*metric.Counter.Value -= resetValue.Counter
+	}
+	if resetValue.Histogram != nil {
+		// TODO(jkohen): the proper implementation needs to substract resetValue.
+		metric.Histogram = resetValue.Histogram
 	}
 }
