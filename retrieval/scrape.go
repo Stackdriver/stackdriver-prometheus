@@ -920,7 +920,7 @@ func (m *pointExtractor) UpdateValue(family *dto.MetricFamily, metric *dto.Metri
 	resetPoint.LastValue = value
 	m.resetPointMap.AddResetPoint(key, *resetPoint)
 	if resetPoint.ResetValue != nil {
-		substractResetValue(*resetPoint.ResetValue, metric)
+		subtractResetValue(*resetPoint.ResetValue, metric)
 	}
 	emit = true
 	resetTimestamp = resetPoint.Timestamp
@@ -931,7 +931,19 @@ func valueFromMetric(metric *dto.Metric) *PointValue {
 	if metric.Counter != nil {
 		return &PointValue{Counter: metric.Counter.GetValue()}
 	} else if metric.Histogram != nil {
-		return &PointValue{Histogram: metric.Histogram}
+		h := metric.Histogram
+		value := &PointValue{
+			Histogram: PointHistogram{
+				Count:  h.GetSampleCount(),
+				Sum:    h.GetSampleSum(),
+				Bucket: make([]PointHistogramBucket, len(h.Bucket)),
+			},
+		}
+		for i, bucket := range h.Bucket {
+			value.Histogram.Bucket[i].UpperBound = bucket.GetUpperBound()
+			value.Histogram.Bucket[i].CumulativeCount = bucket.GetCumulativeCount()
+		}
+		return value
 	}
 	return nil
 }
@@ -940,17 +952,32 @@ func valueReset(metric *dto.Metric, ref PointValue) bool {
 	if metric.Counter != nil {
 		return metric.Counter.GetValue() < ref.Counter
 	} else if metric.Histogram != nil {
-		// TODO(jkohen): implement
+		return metric.Histogram.GetSampleSum() < ref.Histogram.Sum ||
+			metric.Histogram.GetSampleCount() < ref.Histogram.Count
 	}
 	return false
 }
 
-func substractResetValue(resetValue PointValue, metric *dto.Metric) {
+// subtractResetValue expects the histograms to have the same bucket bounds. If this isn't the case, it returns the original struct, which allows for the buckets to change over time, with only some blips in the cumulative data.
+func subtractResetValue(resetValue PointValue, metric *dto.Metric) {
 	if resetValue.Counter > 0 {
 		*metric.Counter.Value -= resetValue.Counter
 	}
-	if resetValue.Histogram != nil {
-		// TODO(jkohen): the proper implementation needs to substract resetValue.
-		metric.Histogram = resetValue.Histogram
+	if resetValue.Histogram.Count > 0 {
+		h := metric.Histogram
+		r := resetValue.Histogram
+		if len(h.Bucket) != len(r.Bucket) {
+			return
+		}
+		for i, bucket := range h.Bucket {
+			if bucket.GetUpperBound() != r.Bucket[i].UpperBound {
+				return
+			}
+		}
+		*h.SampleCount -= r.Count
+		*h.SampleSum -= r.Sum
+		for i, _ := range h.Bucket {
+			*h.Bucket[i].CumulativeCount -= r.Bucket[i].CumulativeCount
+		}
 	}
 }

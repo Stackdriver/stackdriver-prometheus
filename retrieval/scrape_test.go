@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -971,7 +972,12 @@ func TestPointExtractorWithoutProcessStartTime(t *testing.T) {
 	{
 		if _, _, err := sl.append([]byte(
 			"# TYPE metric_a counter\n"+
-				"metric_a 10\n"), now); err != nil {
+				"metric_a 10\n"+
+				"# TYPE metric_h histogram\n"+
+				"metric_h{le=\"100\"} 1\n"+
+				"metric_h{le=\"+Inf\"} 10\n"+
+				"metric_h_count 10\n"+
+				"metric_h_sum 123.1\n"), now); err != nil {
 			t.Fatalf("Unexpected append error: %s", err)
 		}
 		want := []*MetricFamily{}
@@ -985,18 +991,24 @@ func TestPointExtractorWithoutProcessStartTime(t *testing.T) {
 	// tracker. New time series metric_b shows up, has reset time equal to
 	// point time.
 	{
-		metricAReset := now
+		existingReset := now
 		now = now.Add(10 * time.Second)
 		if _, _, err := sl.append([]byte(
 			"# TYPE metric_a counter\n"+
 				"metric_a 20\n"+
 				"# TYPE metric_b counter\n"+
-				"metric_b 11\n"), now); err != nil {
+				"metric_b 11\n"+
+				"# TYPE metric_h histogram\n"+
+				"metric_h{le=\"100\"} 11\n"+
+				"metric_h{le=\"+Inf\"} 30\n"+
+				"metric_h_count 30\n"+
+				"metric_h_sum 223.1\n"), now); err != nil {
 			t.Fatalf("Unexpected append error: %s", err)
 		}
 		want := []*MetricFamily{
-			counterFromComponents("metric_a", timestamp.FromTime(now), timestamp.FromTime(metricAReset), 10),
+			counterFromComponents("metric_a", timestamp.FromTime(now), timestamp.FromTime(existingReset), 10),
 			counterFromComponents("metric_b", timestamp.FromTime(now), timestamp.FromTime(now), 11),
+			histogramFromComponents("metric_h", timestamp.FromTime(now), timestamp.FromTime(existingReset), 10, 20, 100),
 		}
 		sort.Sort(ByName(want))
 		if !reflect.DeepEqual(want, app.Sorted()) {
@@ -1004,21 +1016,26 @@ func TestPointExtractorWithoutProcessStartTime(t *testing.T) {
 		}
 		app.Reset()
 	}
-	// Step #3. metric_a and metric_b were reset (the counter
-	// decreased). Their reset timestamp should be the same as the point
-	// timestamp.
+	// Step #3. All metrics were reset (the counter decreased). Their reset
+	// timestamp should be the same as the point timestamp.
 	{
 		now = now.Add(10 * time.Second)
 		if _, _, err := sl.append([]byte(
 			"# TYPE metric_a counter\n"+
 				"metric_a 10\n"+
 				"# TYPE metric_b counter\n"+
-				"metric_b 1\n"), now); err != nil {
+				"metric_b 1\n"+
+				"# TYPE metric_h histogram\n"+
+				"metric_h{le=\"100\"} 1\n"+
+				"metric_h{le=\"+Inf\"} 10\n"+
+				"metric_h_count 10\n"+
+				"metric_h_sum 23.1\n"), now); err != nil {
 			t.Fatalf("Unexpected append error: %s", err)
 		}
 		want := []*MetricFamily{
 			counterFromComponents("metric_a", timestamp.FromTime(now), timestamp.FromTime(now), 10),
 			counterFromComponents("metric_b", timestamp.FromTime(now), timestamp.FromTime(now), 1),
+			histogramFromComponents("metric_h", timestamp.FromTime(now), timestamp.FromTime(now), 1, 10, 23.1),
 		}
 		sort.Sort(ByName(want))
 		if !reflect.DeepEqual(want, app.Sorted()) {
@@ -1288,7 +1305,6 @@ func untypedFromTriplet(name string, t int64, v float64) *MetricFamily {
 	}
 }
 
-// counterFromComponents is a helper to adapt Prometheus unit tests to the new API based on MetricFamily.
 func counterFromComponents(name string, t int64, reset int64, v float64) *MetricFamily {
 	return &MetricFamily{
 		MetricFamily: &dto.MetricFamily{
@@ -1298,6 +1314,37 @@ func counterFromComponents(name string, t int64, reset int64, v float64) *Metric
 				&dto.Metric{
 					Counter: &dto.Counter{
 						Value: proto.Float64(v),
+					},
+					TimestampMs: proto.Int64(t),
+				},
+			},
+		},
+		MetricResetTimestampMs: []int64{
+			reset,
+		},
+	}
+}
+
+func histogramFromComponents(name string, t int64, reset int64, c1, c2 uint64, sum float64) *MetricFamily {
+	return &MetricFamily{
+		MetricFamily: &dto.MetricFamily{
+			Name: proto.String(name),
+			Type: dto.MetricType_HISTOGRAM.Enum(),
+			Metric: []*dto.Metric{
+				{
+					Histogram: &dto.Histogram{
+						SampleCount: proto.Uint64(c2),
+						SampleSum:   proto.Float64(sum),
+						Bucket: []*dto.Bucket{
+							{
+								CumulativeCount: proto.Uint64(c1),
+								UpperBound:      proto.Float64(100),
+							},
+							{
+								CumulativeCount: proto.Uint64(c2),
+								UpperBound:      proto.Float64(math.Inf(1)),
+							},
+						},
 					},
 					TimestampMs: proto.Int64(t),
 				},

@@ -23,10 +23,21 @@ import (
 
 type ResetPointKey uint64
 
+type PointHistogramBucket struct {
+	CumulativeCount uint64
+	UpperBound      float64
+}
+
+type PointHistogram struct {
+	Count  uint64
+	Sum    float64
+	Bucket []PointHistogramBucket
+}
+
 type PointValue struct {
 	// Only one of the following fields may be set.
 	Counter   float64
-	Histogram *dto.Histogram
+	Histogram PointHistogram
 }
 
 type Point struct {
