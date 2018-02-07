@@ -56,9 +56,9 @@ items:
       # Source: https://github.com/stackdriver/prometheus/blob/master/documentation/examples/prometheus.yml
       global:
         external_labels:
-          _kubernetes_cluster_name: 'prom-test-cluster-2'
+          _kubernetes_cluster_name: 'my-cluster'
           _kubernetes_location: 'us-central1-a'
-          _kubernetes_project_id_or_name: 'prometheus-to-sd'
+          _kubernetes_project_id_or_name: 'my-gcp-project'
 
       # Scrape config for nodes (kubelet).
       #
