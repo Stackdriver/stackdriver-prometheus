@@ -36,11 +36,9 @@ items:
         serviceAccountName: prometheus
         containers:
         - name: prometheus
-          image: gcr.io/prometheus-to-sd/stackdriver-prometheus:master
+          image: gcr.io/stackdriver-prometheus/stackdriver-prometheus:0.1
           # Uncomment this to enable k8s_* resource types. Requires a Stackdriver whitelist.
           #args: ["--config.file=/etc/prometheus/prometheus.yml", "--stackdriver.k8s-resource-types"]
-          # Helps during development, when reusing the tag.
-          imagePullPolicy: Always
           ports:
           - name: web
             containerPort: 9090
