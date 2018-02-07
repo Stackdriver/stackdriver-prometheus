@@ -1005,9 +1005,10 @@ func TestPointExtractorWithoutProcessStartTime(t *testing.T) {
 				"metric_h_sum 223.1\n"), now); err != nil {
 			t.Fatalf("Unexpected append error: %s", err)
 		}
+		resetTime := now.Add(-1 * time.Millisecond)
 		want := []*MetricFamily{
 			counterFromComponents("metric_a", timestamp.FromTime(now), timestamp.FromTime(existingReset), 10),
-			counterFromComponents("metric_b", timestamp.FromTime(now), timestamp.FromTime(now), 11),
+			counterFromComponents("metric_b", timestamp.FromTime(now), timestamp.FromTime(resetTime), 11),
 			histogramFromComponents("metric_h", timestamp.FromTime(now), timestamp.FromTime(existingReset), 10, 20, 100),
 		}
 		sort.Sort(ByName(want))
@@ -1032,10 +1033,11 @@ func TestPointExtractorWithoutProcessStartTime(t *testing.T) {
 				"metric_h_sum 23.1\n"), now); err != nil {
 			t.Fatalf("Unexpected append error: %s", err)
 		}
+		resetTime := now.Add(-1 * time.Millisecond)
 		want := []*MetricFamily{
-			counterFromComponents("metric_a", timestamp.FromTime(now), timestamp.FromTime(now), 10),
-			counterFromComponents("metric_b", timestamp.FromTime(now), timestamp.FromTime(now), 1),
-			histogramFromComponents("metric_h", timestamp.FromTime(now), timestamp.FromTime(now), 1, 10, 23.1),
+			counterFromComponents("metric_a", timestamp.FromTime(now), timestamp.FromTime(resetTime), 10),
+			counterFromComponents("metric_b", timestamp.FromTime(now), timestamp.FromTime(resetTime), 1),
+			histogramFromComponents("metric_h", timestamp.FromTime(now), timestamp.FromTime(resetTime), 1, 10, 23.1),
 		}
 		sort.Sort(ByName(want))
 		if !reflect.DeepEqual(want, app.Sorted()) {
@@ -1089,10 +1091,11 @@ func TestPointExtractorWithProcessStartTime(t *testing.T) {
 				"metric_b 11\n"), now); err != nil {
 			t.Fatalf("Unexpected append error: %s", err)
 		}
+		resetTime := now.Add(-1 * time.Millisecond)
 		want := []*MetricFamily{
 			makeProcessStartTimeMetric(),
 			counterFromComponents("metric_a", timestamp.FromTime(now), processStartTimeMs, 20),
-			counterFromComponents("metric_b", timestamp.FromTime(now), timestamp.FromTime(now), 11),
+			counterFromComponents("metric_b", timestamp.FromTime(now), timestamp.FromTime(resetTime), 11),
 		}
 		sort.Sort(ByName(want))
 		if !reflect.DeepEqual(want, app.Sorted()) {
@@ -1113,10 +1116,11 @@ func TestPointExtractorWithProcessStartTime(t *testing.T) {
 				"metric_b 1\n"), now); err != nil {
 			t.Fatalf("Unexpected append error: %s", err)
 		}
+		resetTime := now.Add(-1 * time.Millisecond)
 		want := []*MetricFamily{
 			makeProcessStartTimeMetric(),
-			counterFromComponents("metric_a", timestamp.FromTime(now), timestamp.FromTime(now), 10),
-			counterFromComponents("metric_b", timestamp.FromTime(now), timestamp.FromTime(now), 1),
+			counterFromComponents("metric_a", timestamp.FromTime(now), timestamp.FromTime(resetTime), 10),
+			counterFromComponents("metric_b", timestamp.FromTime(now), timestamp.FromTime(resetTime), 1),
 		}
 		sort.Sort(ByName(want))
 		if !reflect.DeepEqual(want, app.Sorted()) {

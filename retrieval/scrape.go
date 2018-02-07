@@ -896,7 +896,8 @@ func (m *pointExtractor) UpdateValue(family *dto.MetricFamily, metric *dto.Metri
 	value := valueFromMetric(metric)
 	if m.firstScrape {
 		if timestamp.FromTime(m.processStartTime) == NoTimestamp {
-			// Reset time unknown, use the first point as the reset point.
+			// Reset time unknown, use the first point as the reset
+			// point, and drop its value from the output.
 			m.resetPointMap.AddResetPoint(key, Point{
 				Timestamp:  timestamp.Time(metric.GetTimestampMs()),
 				ResetValue: value,
@@ -914,8 +915,11 @@ func (m *pointExtractor) UpdateValue(family *dto.MetricFamily, metric *dto.Metri
 	if resetPoint == nil ||
 		(resetPoint.LastValue != nil && valueReset(metric, *resetPoint.LastValue)) {
 
-		// New time series or value decreased, use the point itself as the reset point.
-		resetPoint = &Point{Timestamp: timestamp.Time(metric.GetTimestampMs())}
+		// New time series or value decreased, use the point itself as
+		// the reset point. Subtract an epsilon from the reset
+		// timestamp, because Stackdriver requires a non-zero interval
+		// for cumulative metrics.
+		resetPoint = &Point{Timestamp: timestamp.Time(metric.GetTimestampMs() - 1)}
 	}
 	resetPoint.LastValue = value
 	m.resetPointMap.AddResetPoint(key, *resetPoint)
