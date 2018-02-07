@@ -895,21 +895,21 @@ func (m *pointExtractor) UpdateValue(family *dto.MetricFamily, metric *dto.Metri
 		family.GetName(), labelPairsToLabels(metric.Label), family.GetType())
 	value := valueFromMetric(metric)
 	if m.firstScrape {
+		m.resetPointMap.AddResetPoint(key, Point{
+			Timestamp:  timestamp.Time(metric.GetTimestampMs()),
+			ResetValue: value,
+			LastValue:  value,
+		})
 		if timestamp.FromTime(m.processStartTime) == NoTimestamp {
 			// Reset time unknown, use the first point as the reset
 			// point, and drop its value from the output.
-			m.resetPointMap.AddResetPoint(key, Point{
-				Timestamp:  timestamp.Time(metric.GetTimestampMs()),
-				ResetValue: value,
-				LastValue:  value,
-			})
 			emit = false
-			return
 		} else {
 			// Reset time from process restart time, use that as the reset point.
-			m.resetPointMap.AddResetPoint(key,
-				Point{Timestamp: m.processStartTime, LastValue: value})
+			emit = true
+			resetTimestamp = m.processStartTime
 		}
+		return
 	}
 	resetPoint := m.resetPointMap.GetResetPoint(key)
 	if resetPoint == nil ||

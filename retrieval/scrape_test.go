@@ -87,6 +87,10 @@ func (m *simpleResetPointMap) HasResetPoints() bool {
 	return len(m.m) > 0
 }
 
+func (m *simpleResetPointMap) Clear() {
+	m.m = map[ResetPointKey]Point{}
+}
+
 func makeProcessStartTimeMetric() *MetricFamily {
 	return &MetricFamily{
 		MetricFamily: &dto.MetricFamily{
@@ -1078,10 +1082,15 @@ func TestPointExtractorWithProcessStartTime(t *testing.T) {
 		}
 		app.Reset()
 	}
-	// Step #2. Reset time for metric_a is extracted from the point
-	// tracker. New time series metric_b shows up, has reset time equal to
+	// Step #2. Reset time for metric_a is extracted from the point tracker;
+	// note that it no longer resets at process restart time, because if the
+	// time series had already been written to Stackdriver by a previous
+	// process, it may have had a more recent reset timestamp, and
+	// Stackdriver would reject the new points until the next process
+	// restart. New time series metric_b shows up, has reset time equal to
 	// point time.
 	{
+		existingReset := now
 		now = now.Add(10 * time.Second)
 		if _, _, err := sl.append([]byte(
 			processStartTimeSecondsText+
@@ -1094,7 +1103,7 @@ func TestPointExtractorWithProcessStartTime(t *testing.T) {
 		resetTime := now.Add(-1 * time.Millisecond)
 		want := []*MetricFamily{
 			makeProcessStartTimeMetric(),
-			counterFromComponents("metric_a", timestamp.FromTime(now), processStartTimeMs, 20),
+			counterFromComponents("metric_a", timestamp.FromTime(now), timestamp.FromTime(existingReset), 10),
 			counterFromComponents("metric_b", timestamp.FromTime(now), timestamp.FromTime(resetTime), 11),
 		}
 		sort.Sort(ByName(want))
