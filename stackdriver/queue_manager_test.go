@@ -42,6 +42,19 @@ type sample struct {
 	Value  float64
 }
 
+func init() {
+	// Override the default resource mappings, so they only require the
+	// project id resource label, which makes the tests more concise.
+	DefaultResourceMappings = []ResourceMap{
+		{
+			Type: "global",
+			LabelMap: map[string]string{
+				ProjectIdLabel: "project_id",
+			},
+		},
+	}
+}
+
 func NewTestStorageClient() *TestStorageClient {
 	return &TestStorageClient{
 		receivedSamples: map[string][]sample{},
