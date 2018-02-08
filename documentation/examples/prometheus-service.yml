@@ -4,8 +4,6 @@ items:
 - kind: Service
   apiVersion: v1
   metadata:
-    annotations:
-      prometheus.io/scrape: 'true'
     labels:
       name: prometheus
     name: prometheus
@@ -31,6 +29,8 @@ items:
         name: prometheus
         labels:
           app: prometheus
+        annotations:
+          prometheus.io/scrape: 'true'
       spec:
         # Needed when using unmodified rbac-setup.yml
         serviceAccountName: prometheus
