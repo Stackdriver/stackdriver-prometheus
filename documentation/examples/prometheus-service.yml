@@ -38,7 +38,7 @@ items:
         - name: prometheus
           image: gcr.io/prometheus-to-sd/stackdriver-prometheus:master
           # Uncomment this to enable k8s_* resource types. Requires a Stackdriver whitelist.
-          args: ["--config.file=/etc/prometheus/prometheus.yml", "--stackdriver.k8s-resource-types"]
+          #args: ["--config.file=/etc/prometheus/prometheus.yml", "--stackdriver.k8s-resource-types"]
           # Helps during development, when reusing the tag.
           imagePullPolicy: Always
           ports:
