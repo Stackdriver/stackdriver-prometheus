@@ -95,9 +95,27 @@ items:
           regex: (.+)
           target_label: __metrics_path__
           replacement: /api/v1/nodes/${1}/proxy/metrics
+        # Uncomment the next block and remove all below if you enabled the k8s_* resource types
+        # with --stackdriver.k8s-resource-types in the argument list above.
+        #
+        # - source_labels: [__meta_kubernetes_node_name]
+        #   action: replace
+        #   target_label: _kubernetes_node_name
+        - source_labels: []
+          action: replace
+          replacement: 'machine'
+          target_label: _kubernetes_namespace
+        - source_labels: []
+          action: replace
+          replacement: 'machine'
+          target_label: _kubernetes_pod_name
         - source_labels: [__meta_kubernetes_node_name]
           action: replace
-          target_label: _kubernetes_node_name
+          target_label: _kubernetes_pod_node_name
+        - source_labels: []
+          action: replace
+          replacement: 'machine'
+          target_label: _kubernetes_pod_container_name
 
       # Example scrape config for pods
       #
