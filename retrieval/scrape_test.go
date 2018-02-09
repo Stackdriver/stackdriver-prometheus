@@ -39,12 +39,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-const (
-	processStartTimeMs          = int64(1234567890432)
-	processStartTimeSecondsText = "# TYPE process_start_time_seconds gauge\n" +
-		"process_start_time_seconds 1234567890.4321 1234568000432\n"
-)
-
 // Implements resetPointMapper.
 type fakeResetPointMap struct {
 }
@@ -89,24 +83,6 @@ func (m *simpleResetPointMap) HasResetPoints() bool {
 
 func (m *simpleResetPointMap) Clear() {
 	m.m = map[ResetPointKey]Point{}
-}
-
-func makeProcessStartTimeMetric() *MetricFamily {
-	return &MetricFamily{
-		MetricFamily: &dto.MetricFamily{
-			Name: proto.String(processStartTimeMetricName),
-			Type: dto.MetricType_GAUGE.Enum(),
-			Metric: []*dto.Metric{
-				{
-					Gauge:       &dto.Gauge{Value: proto.Float64(1234567890.4321)},
-					TimestampMs: proto.Int64(1234568000432),
-				},
-			},
-		},
-		MetricResetTimestampMs: []int64{
-			NoTimestamp,
-		},
-	}
 }
 
 func TestNewScrapePool(t *testing.T) {
@@ -550,60 +526,24 @@ func TestScrapeLoopAppend(t *testing.T) {
 
 	now := time.Now()
 	_, _, err := sl.append([]byte(
-		processStartTimeSecondsText+
-			"metric_a 1\n"+
+		"metric_a 1\n"+
 			"metric_b NaN\n"), now)
 	if err != nil {
 		t.Fatalf("Unexpected append error: %s", err)
 	}
 	result := app.Sorted()
-	if len(result) < 3 || len(result[1].Metric) < 1 {
-		t.Fatalf("expected 3 metrics; got %v", result)
+	if len(result) != 2 || len(result[1].Metric) < 1 {
+		t.Fatalf("expected 2 metrics; got %v", result)
 	}
 	// DeepEqual will report NaNs as being different, so replace with a different value.
 	result[1].Metric[0].Untyped.Value = proto.Float64(42)
 	want := []*MetricFamily{
-		makeProcessStartTimeMetric(),
 		untypedFromTriplet("metric_a", timestamp.FromTime(now), 1),
 		untypedFromTriplet("metric_b", timestamp.FromTime(now), 42),
 	}
 	sort.Sort(ByName(want))
 	if !reflect.DeepEqual(want, result) {
 		t.Fatalf("Appended samples not as expected.\nWanted: %+v\nGot:    %+v", want, result)
-	}
-}
-
-func TestScrapeLoopAppendMissingProcessStartTime(t *testing.T) {
-	app := &collectResultAppender{}
-
-	sl := newScrapeLoop(context.Background(),
-		nil, &fakeResetPointMap{},
-		nil, nil,
-		nopMutator,
-		nopMutator,
-		func() Appender { return app },
-	)
-
-	now := time.Now()
-	_, _, err := sl.append([]byte(
-		"metric_a 1\n"+
-			"metric_b 2\n"), now)
-	if err != nil {
-		t.Fatalf("Unexpected append error: %s", err)
-	}
-	want := []*MetricFamily{
-		untypedFromTriplet("metric_a", timestamp.FromTime(now), 1),
-		untypedFromTriplet("metric_b", timestamp.FromTime(now), 2),
-	}
-	// Unset the reset timestamp, because we don't pass processStartTimeMetricName in the input.
-	for _, family := range want {
-		for i, _ := range family.MetricResetTimestampMs {
-			family.MetricResetTimestampMs[i] = NoTimestamp
-		}
-	}
-	sort.Sort(ByName(want))
-	if !reflect.DeepEqual(want, app.Sorted()) {
-		t.Fatalf("Appended samples not as expected. Wanted: %+v Got: %+v", want, app.Sorted())
 	}
 }
 
@@ -624,15 +564,13 @@ func TestScrapeLoopMutator(t *testing.T) {
 
 	now := time.Now()
 	_, _, err := sl.append([]byte(
-		processStartTimeSecondsText+
-			"metric_a 1\n"+
+		"metric_a 1\n"+
 			"metric_b 2\n"), now)
 	if err != nil {
 		t.Fatalf("Unexpected append error: %s", err)
 	}
 	result := app.Sorted()
 	want := []*MetricFamily{
-		addMetricLabels(makeProcessStartTimeMetric(), "new_label", "foo"),
 		addMetricLabels(
 			untypedFromTriplet("metric_a", timestamp.FromTime(now), 1), "new_label", "foo"),
 		addMetricLabels(
@@ -672,8 +610,7 @@ func TestScrapeLoopMutatorDeletesMetric(t *testing.T) {
 
 	now := time.Now()
 	_, _, err := sl.append([]byte(
-		processStartTimeSecondsText+
-			"metric_a{delete=\"metric\"} 1\n"+
+		"metric_a{delete=\"metric\"} 1\n"+
 			"metric_b{keep=\"x\"} 2\n"+
 			"metric_b{delete=\"label\",keep=\"y\"} 3\n"), now)
 	if err != nil {
@@ -747,8 +684,7 @@ func TestScrapeLoopAppendSampleLimit(t *testing.T) {
 
 	now := time.Now()
 	_, _, err = sl.append([]byte(
-		processStartTimeSecondsText+
-			"metric_a 1\n"+
+		"metric_a 1\n"+
 			"metric_b 1\n"+
 			"metric_c 1\n"), now)
 	if err != errSampleLimit {
@@ -786,9 +722,7 @@ func TestScrapeLoopAppendNoStalenessIfTimestamp(t *testing.T) {
 	)
 
 	now := time.Now()
-	_, _, err := sl.append([]byte(
-		processStartTimeSecondsText+
-			"metric_a 1 1000\n"), now)
+	_, _, err := sl.append([]byte("metric_a 1 1000\n"), now)
 	if err != nil {
 		t.Fatalf("Unexpected append error: %s", err)
 	}
@@ -798,7 +732,6 @@ func TestScrapeLoopAppendNoStalenessIfTimestamp(t *testing.T) {
 	}
 
 	want := []*MetricFamily{
-		makeProcessStartTimeMetric(),
 		untypedFromTriplet("metric_a", 1000, 1),
 	}
 	sort.Sort(ByName(want))
@@ -908,8 +841,7 @@ func TestScrapeLoopAppendGracefullyIfAmendOrOutOfOrderOrOutOfBounds(t *testing.T
 
 	now := time.Unix(1, 0)
 	_, _, err := sl.append([]byte(
-		processStartTimeSecondsText+
-			"out_of_order 1\n"+
+		"out_of_order 1\n"+
 			"amend 1\n"+
 			"normal 1\n"+
 			"out_of_bounds 1\n"), now)
@@ -917,7 +849,6 @@ func TestScrapeLoopAppendGracefullyIfAmendOrOutOfOrderOrOutOfBounds(t *testing.T
 		t.Fatalf("Unexpected append error: %s", err)
 	}
 	want := []*MetricFamily{
-		makeProcessStartTimeMetric(),
 		untypedFromTriplet("normal", timestamp.FromTime(now), 1),
 	}
 	sort.Sort(ByName(want))
@@ -942,16 +873,14 @@ func TestScrapeLoopOutOfBoundsTimeError(t *testing.T) {
 	)
 
 	now := time.Now().Add(20 * time.Minute)
-	total, added, err := sl.append([]byte(
-		processStartTimeSecondsText+
-			"normal 1\n"), now)
-	if total != 2 {
-		t.Error("expected 2 metrics")
+	total, added, err := sl.append([]byte("normal 1\n"), now)
+	if total != 1 {
+		t.Error("expected 1 metric")
 		return
 	}
 
-	if added != 1 {
-		t.Errorf("only metric %v should be added", processStartTimeMetricName)
+	if added != 0 {
+		t.Errorf("unexpected metrics")
 	}
 
 	if err != nil {
@@ -959,7 +888,7 @@ func TestScrapeLoopOutOfBoundsTimeError(t *testing.T) {
 	}
 }
 
-func TestPointExtractorWithoutProcessStartTime(t *testing.T) {
+func TestPointExtractor(t *testing.T) {
 	app := &collectResultAppender{}
 
 	resetPointMap := newSimpleResetPointMap()
@@ -1042,94 +971,6 @@ func TestPointExtractorWithoutProcessStartTime(t *testing.T) {
 			counterFromComponents("metric_a", timestamp.FromTime(now), timestamp.FromTime(resetTime), 10),
 			counterFromComponents("metric_b", timestamp.FromTime(now), timestamp.FromTime(resetTime), 1),
 			histogramFromComponents("metric_h", timestamp.FromTime(now), timestamp.FromTime(resetTime), 1, 10, 23.1),
-		}
-		sort.Sort(ByName(want))
-		if !reflect.DeepEqual(want, app.Sorted()) {
-			t.Fatalf("Appended samples not as expected.\nWanted: %+v\nGot:    %+v", want, app.Sorted())
-		}
-		app.Reset()
-	}
-}
-
-func TestPointExtractorWithProcessStartTime(t *testing.T) {
-	app := &collectResultAppender{}
-
-	resetPointMap := newSimpleResetPointMap()
-	sl := newScrapeLoop(context.Background(),
-		nil, &resetPointMap,
-		nil, nil,
-		nopMutator,
-		nopMutator,
-		func() Appender { return app },
-	)
-
-	now := time.Now()
-	// Step #1. No resource tracker, reset time is extracted from process_start_time_seconds.
-	{
-		if _, _, err := sl.append([]byte(
-			processStartTimeSecondsText+
-				"# TYPE metric_a counter\n"+
-				"metric_a 10\n"), now); err != nil {
-			t.Fatalf("Unexpected append error: %s", err)
-		}
-		want := []*MetricFamily{
-			makeProcessStartTimeMetric(),
-			counterFromComponents("metric_a", timestamp.FromTime(now), processStartTimeMs, 10),
-		}
-		sort.Sort(ByName(want))
-		if !reflect.DeepEqual(want, app.Sorted()) {
-			t.Fatalf("Appended samples not as expected.\nWanted: %+v\nGot:    %+v", want, app.Sorted())
-		}
-		app.Reset()
-	}
-	// Step #2. Reset time for metric_a is extracted from the point tracker;
-	// note that it no longer resets at process restart time, because if the
-	// time series had already been written to Stackdriver by a previous
-	// process, it may have had a more recent reset timestamp, and
-	// Stackdriver would reject the new points until the next process
-	// restart. New time series metric_b shows up, has reset time equal to
-	// point time.
-	{
-		existingReset := now
-		now = now.Add(10 * time.Second)
-		if _, _, err := sl.append([]byte(
-			processStartTimeSecondsText+
-				"# TYPE metric_a counter\n"+
-				"metric_a 20\n"+
-				"# TYPE metric_b counter\n"+
-				"metric_b 11\n"), now); err != nil {
-			t.Fatalf("Unexpected append error: %s", err)
-		}
-		resetTime := now.Add(-1 * time.Millisecond)
-		want := []*MetricFamily{
-			makeProcessStartTimeMetric(),
-			counterFromComponents("metric_a", timestamp.FromTime(now), timestamp.FromTime(existingReset), 10),
-			counterFromComponents("metric_b", timestamp.FromTime(now), timestamp.FromTime(resetTime), 11),
-		}
-		sort.Sort(ByName(want))
-		if !reflect.DeepEqual(want, app.Sorted()) {
-			t.Fatalf("Appended samples not as expected.\nWanted: %+v\nGot:    %+v", want, app.Sorted())
-		}
-		app.Reset()
-	}
-	// Step #3. metric_a and metric_b were reset (the counter
-	// decreased). Their reset timestamp should be the same as the point
-	// timestamp.
-	{
-		now = now.Add(10 * time.Second)
-		if _, _, err := sl.append([]byte(
-			processStartTimeSecondsText+
-				"# TYPE metric_a counter\n"+
-				"metric_a 10\n"+
-				"# TYPE metric_b counter\n"+
-				"metric_b 1\n"), now); err != nil {
-			t.Fatalf("Unexpected append error: %s", err)
-		}
-		resetTime := now.Add(-1 * time.Millisecond)
-		want := []*MetricFamily{
-			makeProcessStartTimeMetric(),
-			counterFromComponents("metric_a", timestamp.FromTime(now), timestamp.FromTime(resetTime), 10),
-			counterFromComponents("metric_b", timestamp.FromTime(now), timestamp.FromTime(resetTime), 1),
 		}
 		sort.Sort(ByName(want))
 		if !reflect.DeepEqual(want, app.Sorted()) {

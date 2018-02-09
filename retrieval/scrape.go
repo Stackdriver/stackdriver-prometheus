@@ -20,7 +20,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"math"
 	"net/http"
 	"strings"
 	"sync"
@@ -135,8 +134,6 @@ type scrapePool struct {
 
 const (
 	maxAheadTime = 10 * time.Minute
-	// Built-in Prometheus metric exporting process start time.
-	processStartTimeMetricName = "process_start_time_seconds"
 )
 
 type labelsMutator func(labels.Labels) labels.Labels
@@ -653,16 +650,8 @@ func (sl *scrapeLoop) append(b []byte, ts time.Time) (total, added int, err erro
 		numOutOfBounds = 0
 	)
 	var sampleLimitErr error
-	var processResetTime time.Time
-	if processResetTime = getResetTime(metricFamilies); processResetTime.IsZero() {
-		level.Error(sl.l).Log("msg", "missing process_start_time_seconds; reset timestamps may be inaccurate")
-		// Continue with the default processResetTime.
-		processResetTime = timestamp.Time(NoTimestamp)
-	} else {
-		level.Debug(sl.l).Log("msg", "extracted process start time", "time", processResetTime)
-	}
 
-	extractor := newPointExtractor(sl.resetPointMap, processResetTime)
+	extractor := newPointExtractor(sl.resetPointMap)
 loop:
 	for name, metricFamily := range metricFamilies {
 		total++
@@ -848,36 +837,19 @@ func labelsToLabelPairs(lset labels.Labels) []*dto.LabelPair {
 	return labelPairs
 }
 
-func getResetTime(metrics map[string]*dto.MetricFamily) time.Time {
-	// For cumulative metrics we need to know process start time.
-	if family, ok := metrics[processStartTimeMetricName]; ok {
-		if family.GetType() == dto.MetricType_GAUGE &&
-			len(family.GetMetric()) == 1 {
-
-			value := family.Metric[0].Gauge.GetValue()
-			startSeconds := math.Trunc(value)
-			startNanos := 1000000000 * (value - startSeconds)
-			return time.Unix(int64(startSeconds), int64(startNanos))
-		}
-	}
-	return time.Time{}
-}
-
 type pointExtractor struct {
-	resetPointMap    resetPointMapper
-	firstScrape      bool
-	processStartTime time.Time
+	resetPointMap resetPointMapper
+	firstScrape   bool
 }
 
 // newPointExtractor returns a new PointExtractor. A new PointExtractor should
 // be used for each independent scrape. On the other hand, the resetPointMap
 // should match the life cycle of the target as accurately as possible (as
 // opposed to the scrapeLoop).
-func newPointExtractor(resetPointMap resetPointMapper, processStartTime time.Time) (mutator *pointExtractor) {
+func newPointExtractor(resetPointMap resetPointMapper) (mutator *pointExtractor) {
 	return &pointExtractor{
-		resetPointMap:    resetPointMap,
-		firstScrape:      !resetPointMap.HasResetPoints(),
-		processStartTime: processStartTime,
+		resetPointMap: resetPointMap,
+		firstScrape:   !resetPointMap.HasResetPoints(),
 	}
 }
 
@@ -900,15 +872,9 @@ func (m *pointExtractor) UpdateValue(family *dto.MetricFamily, metric *dto.Metri
 			ResetValue: value,
 			LastValue:  value,
 		})
-		if timestamp.FromTime(m.processStartTime) == NoTimestamp {
-			// Reset time unknown, use the first point as the reset
-			// point, and drop its value from the output.
-			emit = false
-		} else {
-			// Reset time from process restart time, use that as the reset point.
-			emit = true
-			resetTimestamp = m.processStartTime
-		}
+		// Reset time unknown, use the first point as the reset
+		// point, and drop its value from the output.
+		emit = false
 		return
 	}
 	resetPoint := m.resetPointMap.GetResetPoint(key)
