@@ -1545,10 +1545,10 @@
 			"revisionTime": "2017-06-08T03:40:07Z"
 		},
 		{
-			"checksumSHA1": "TELSDa3VkpEE3kfa72tBSGEct5I=",
+			"checksumSHA1": "YUtkD7piacEhvoNBOekphNdNK9A=",
 			"path": "google.golang.org/grpc",
-			"revision": "84bc9597164f671c0130543778228928d6865c5c",
-			"revisionTime": "2017-06-08T03:40:07Z"
+			"revision": "6c48c7f5c8d60269eb9f72197e2926cb1a6ffea8",
+			"revisionTime": "2018-02-12T22:41:34Z"
 		},
 		{
 			"checksumSHA1": "08icuA15HRkdYCt6H+Cs90RPQsY=",
