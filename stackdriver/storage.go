@@ -93,6 +93,7 @@ func (s *Storage) ApplyConfig(conf *config.Config) error {
 			ProjectId: projectId,
 			URL:       rwConf.URL,
 			Timeout:   rwConf.RemoteTimeout,
+			Auth:      true,
 		})
 		if err != nil {
 			return err

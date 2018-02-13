@@ -15,14 +15,17 @@ package stackdriver
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
 	"sync"
 	"time"
 
-	"golang.org/x/oauth2/google"
-
-	"google.golang.org/api/googleapi"
-	monitoring "google.golang.org/api/monitoring/v3"
+	monitoring "google.golang.org/genproto/googleapis/monitoring/v3"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/credentials/oauth"
+	"google.golang.org/grpc/status"
 
 	"github.com/go-kit/kit/log"
 	"github.com/go-kit/kit/log/level"
@@ -35,6 +38,7 @@ const (
 	// TODO(jkohen): Use a custom prefix specific to Prometheus.
 	metricsPrefix             = "custom.googleapis.com"
 	maxTimeseriesesPerRequest = 200
+	MonitoringWriteScope      = "https://www.googleapis.com/auth/monitoring.write"
 )
 
 // Client allows reading and writing from/to a remote HTTP endpoint.
@@ -44,6 +48,7 @@ type Client struct {
 	projectId string
 	url       *config_util.URL
 	timeout   time.Duration
+	dopts     []grpc.DialOption
 }
 
 // ClientConfig configures a Client.
@@ -52,6 +57,7 @@ type ClientConfig struct {
 	ProjectId string // The Stackdriver project id in "projects/name-or-number" format.
 	URL       *config_util.URL
 	Timeout   model.Duration
+	Auth      bool
 }
 
 // NewClient creates a new Client.
@@ -60,12 +66,26 @@ func NewClient(index int, conf *ClientConfig) (*Client, error) {
 	if logger == nil {
 		logger = log.NewNopLogger()
 	}
+	dopts := []grpc.DialOption{}
+	if conf.Auth {
+		rpcCreds, err := oauth.NewApplicationDefault(context.Background(), MonitoringWriteScope)
+		if err != nil {
+			return nil, err
+		}
+		tlsCreds := credentials.NewTLS(&tls.Config{})
+		dopts = append(dopts,
+			grpc.WithTransportCredentials(tlsCreds),
+			grpc.WithPerRPCCredentials(rpcCreds))
+	} else {
+		dopts = append(dopts, grpc.WithInsecure())
+	}
 	return &Client{
 		index:     index,
 		logger:    logger,
 		projectId: conf.ProjectId,
 		url:       conf.URL,
 		timeout:   time.Duration(conf.Timeout),
+		dopts:     dopts,
 	}, nil
 }
 
@@ -84,15 +104,19 @@ func (c *Client) Store(req *monitoring.CreateTimeSeriesRequest) error {
 	ctx, cancel := context.WithTimeout(context.Background(), c.timeout)
 	defer cancel()
 
-	client, err := google.DefaultClient(ctx, monitoring.MonitoringWriteScope)
+	address := c.url.Hostname()
+	if len(c.url.Port()) > 0 {
+		address = fmt.Sprintf("%s:%s", address, c.url.Port())
+	}
+	level.Debug(c.logger).Log(
+		"msg", "sending request to Stackdriver",
+		"address", address)
+	conn, err := grpc.Dial(address, c.dopts...)
 	if err != nil {
 		return err
 	}
-	service, err := monitoring.New(client)
-	service.BasePath = c.url.String()
-	if err != nil {
-		return err
-	}
+	defer conn.Close()
+	service := monitoring.NewMetricServiceClient(conn)
 
 	errors := make(chan error, len(tss)/maxTimeseriesesPerRequest+1)
 	var wg sync.WaitGroup
@@ -105,21 +129,22 @@ func (c *Client) Store(req *monitoring.CreateTimeSeriesRequest) error {
 		go func(begin int, end int) {
 			defer wg.Done()
 			req_copy := &monitoring.CreateTimeSeriesRequest{
+				Name:       c.projectId,
 				TimeSeries: req.TimeSeries[begin:end],
 			}
-			_, err := service.Projects.TimeSeries.Create(c.projectId, req_copy).Context(ctx).Do()
+			_, err := service.CreateTimeSeries(ctx, req_copy)
 			if err != nil {
-				b, _ := req_copy.MarshalJSON()
 				level.Debug(c.logger).Log(
 					"msg", "Partial failure calling CreateTimeSeries",
 					"err", err,
-					"req", string(b))
-				gerr, ok := err.(*googleapi.Error)
+					"req", req_copy.String())
+				status, ok := status.FromError(err)
 				if !ok {
 					level.Warn(c.logger).Log("msg", "Unexpected error message type from Monitoring API", "err", err)
 					errors <- err
+					return
 				}
-				if gerr.Code/100 == 5 {
+				if status.Code() == codes.Unavailable {
 					errors <- recoverableError{err}
 				} else {
 					errors <- err

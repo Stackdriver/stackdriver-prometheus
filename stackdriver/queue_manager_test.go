@@ -26,7 +26,7 @@ import (
 	dto "github.com/prometheus/client_model/go"
 	"github.com/prometheus/common/model"
 	"github.com/prometheus/prometheus/config"
-	monitoring "google.golang.org/api/monitoring/v3"
+	monitoring "google.golang.org/genproto/googleapis/monitoring/v3"
 )
 
 type TestStorageClient struct {
@@ -100,7 +100,7 @@ func (c *TestStorageClient) Store(req *monitoring.CreateTimeSeriesRequest) error
 			s := sample{
 				Name:   name,
 				Labels: ts.Metric.Labels,
-				Value:  *point.Value.DoubleValue,
+				Value:  point.Value.GetDoubleValue(),
 			}
 			c.receivedSamples[name] = append(c.receivedSamples[name], s)
 		}

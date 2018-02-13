@@ -23,7 +23,7 @@ import (
 	"github.com/jkohen/prometheus/retrieval"
 	dto "github.com/prometheus/client_model/go"
 	"golang.org/x/time/rate"
-	monitoring "google.golang.org/api/monitoring/v3"
+	monitoring "google.golang.org/genproto/googleapis/monitoring/v3"
 
 	"github.com/go-kit/kit/log"
 	"github.com/go-kit/kit/log/level"

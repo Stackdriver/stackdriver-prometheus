@@ -22,10 +22,14 @@ import (
 	"github.com/go-kit/kit/log"
 	"github.com/go-kit/kit/log/level"
 	"github.com/golang/glog"
+	timestamp_pb "github.com/golang/protobuf/ptypes/timestamp"
 	"github.com/jkohen/prometheus/retrieval"
 	dto "github.com/prometheus/client_model/go"
 	"github.com/prometheus/prometheus/pkg/timestamp"
-	monitoring "google.golang.org/api/monitoring/v3"
+	distribution_pb "google.golang.org/genproto/googleapis/api/distribution"
+	metric_pb "google.golang.org/genproto/googleapis/api/metric"
+	monitoredres_pb "google.golang.org/genproto/googleapis/api/monitoredres"
+	monitoring_pb "google.golang.org/genproto/googleapis/monitoring/v3"
 )
 
 var supportedMetricTypes = map[dto.MetricType]bool{
@@ -65,13 +69,13 @@ func NewTranslator(logger log.Logger, metricsPrefix string, resourceMappings []R
 
 // ToCreateTimeSeriesRequest translates metrics in Prometheus format to Stackdriver format.
 func (t *Translator) ToCreateTimeSeriesRequest(
-	metrics []*retrieval.MetricFamily) *monitoring.CreateTimeSeriesRequest {
+	metrics []*retrieval.MetricFamily) *monitoring_pb.CreateTimeSeriesRequest {
 
 	// TODO(jkohen): See if it's possible for Prometheus to pass two points
 	// for the same time series, which isn't accepted by the Stackdriver
 	// Monitoring API.
-	request := &monitoring.CreateTimeSeriesRequest{
-		TimeSeries: []*monitoring.TimeSeries{},
+	request := &monitoring_pb.CreateTimeSeriesRequest{
+		TimeSeries: []*monitoring_pb.TimeSeries{},
 	}
 	for _, family := range metrics {
 		tss, err := t.translateFamily(family)
@@ -90,8 +94,8 @@ func (t *Translator) ToCreateTimeSeriesRequest(
 	return request
 }
 
-func (t *Translator) translateFamily(family *retrieval.MetricFamily) ([]*monitoring.TimeSeries, error) {
-	var tss []*monitoring.TimeSeries
+func (t *Translator) translateFamily(family *retrieval.MetricFamily) ([]*monitoring_pb.TimeSeries, error) {
+	var tss []*monitoring_pb.TimeSeries
 	if _, found := supportedMetricTypes[family.GetType()]; !found {
 		return tss, &unsupportedTypeError{family.GetType()}
 	}
@@ -117,28 +121,32 @@ func getMetricType(metricsPrefix string, name string) string {
 	return fmt.Sprintf("%s/%s", metricsPrefix, name)
 }
 
+func getTimestamp(ts time.Time) *timestamp_pb.Timestamp {
+	return &timestamp_pb.Timestamp{
+		Seconds: ts.Truncate(time.Second).Unix(),
+		Nanos:   int32(ts.Nanosecond()),
+	}
+}
+
 // assumes that mType is Counter, Gauge or Histogram. Returns nil on error.
 func (t *Translator) translateOne(name string,
 	mType dto.MetricType,
 	metric *dto.Metric,
-	start time.Time) (*monitoring.TimeSeries, error) {
+	start time.Time) (*monitoring_pb.TimeSeries, error) {
 	monitoredResource := t.getMonitoredResource(metric)
 	if monitoredResource == nil {
 		return nil, errors.New("cannot extract Stackdriver monitored resource from metric")
 	}
-	interval := &monitoring.TimeInterval{
-		EndTime: timestamp.Time(metric.GetTimestampMs()).UTC().Format(time.RFC3339Nano),
+	interval := &monitoring_pb.TimeInterval{
+		EndTime: getTimestamp(timestamp.Time(metric.GetTimestampMs()).UTC()),
 	}
 	metricKind := extractMetricKind(mType)
-	if metricKind == "CUMULATIVE" {
-		interval.StartTime = start.UTC().Format(time.RFC3339Nano)
+	if metricKind == metric_pb.MetricDescriptor_CUMULATIVE {
+		interval.StartTime = getTimestamp(start.UTC())
 	}
 	valueType := extractValueType(mType)
-	point := &monitoring.Point{
+	point := &monitoring_pb.Point{
 		Interval: interval,
-		Value: &monitoring.TypedValue{
-			ForceSendFields: []string{},
-		},
 	}
 	setValue(mType, valueType, metric, point)
 
@@ -148,47 +156,59 @@ func (t *Translator) translateOne(name string,
 			"dropping metric because it has more than %v labels, and Stackdriver would reject it",
 			maxLabelCount)
 	}
-	return &monitoring.TimeSeries{
-		Metric: &monitoring.Metric{
+	return &monitoring_pb.TimeSeries{
+		Metric: &metric_pb.Metric{
 			Labels: tsLabels,
 			Type:   getMetricType(t.metricsPrefix, name),
 		},
 		Resource:   monitoredResource,
 		MetricKind: metricKind,
 		ValueType:  valueType,
-		Points:     []*monitoring.Point{point},
+		Points:     []*monitoring_pb.Point{point},
 	}, nil
 }
 
-func setValue(mType dto.MetricType, valueType string, metric *dto.Metric, point *monitoring.Point) {
+func setValue(
+	mType dto.MetricType, valueType metric_pb.MetricDescriptor_ValueType,
+	metric *dto.Metric, point *monitoring_pb.Point) {
+
+	point.Value = &monitoring_pb.TypedValue{}
 	if mType == dto.MetricType_GAUGE {
 		setValueBaseOnSimpleType(metric.GetGauge().GetValue(), valueType, point)
 	} else if mType == dto.MetricType_HISTOGRAM {
-		point.Value.DistributionValue = convertToDistributionValue(metric.GetHistogram())
-		point.ForceSendFields = append(point.ForceSendFields, "DistributionValue")
+		point.Value = &monitoring_pb.TypedValue{
+			Value: &monitoring_pb.TypedValue_DistributionValue{
+				DistributionValue: convertToDistributionValue(metric.GetHistogram()),
+			},
+		}
 	} else {
 		setValueBaseOnSimpleType(metric.GetCounter().GetValue(), valueType, point)
 	}
 }
 
-func setValueBaseOnSimpleType(value float64, valueType string, point *monitoring.Point) {
-	if valueType == "INT64" {
-		val := int64(value)
-		point.Value.Int64Value = &val
-		point.ForceSendFields = append(point.ForceSendFields, "Int64Value")
-	} else if valueType == "DOUBLE" {
-		point.Value.DoubleValue = &value
-		point.ForceSendFields = append(point.ForceSendFields, "DoubleValue")
-	} else if valueType == "BOOL" {
+func setValueBaseOnSimpleType(
+	value float64, valueType metric_pb.MetricDescriptor_ValueType,
+	point *monitoring_pb.Point) {
+
+	if valueType == metric_pb.MetricDescriptor_INT64 {
+		point.Value = &monitoring_pb.TypedValue{
+			Value: &monitoring_pb.TypedValue_Int64Value{Int64Value: int64(value)},
+		}
+	} else if valueType == metric_pb.MetricDescriptor_DOUBLE {
+		point.Value = &monitoring_pb.TypedValue{
+			Value: &monitoring_pb.TypedValue_DoubleValue{DoubleValue: value},
+		}
+	} else if valueType == metric_pb.MetricDescriptor_BOOL {
 		var val = math.Abs(value) > falseValueEpsilon
-		point.Value.BoolValue = &val
-		point.ForceSendFields = append(point.ForceSendFields, "BoolValue")
+		point.Value = &monitoring_pb.TypedValue{
+			Value: &monitoring_pb.TypedValue_BoolValue{BoolValue: val},
+		}
 	} else {
 		glog.Errorf("Value type '%s' is not supported yet.", valueType)
 	}
 }
 
-func convertToDistributionValue(h *dto.Histogram) *monitoring.Distribution {
+func convertToDistributionValue(h *dto.Histogram) *distribution_pb.Distribution {
 	count := int64(h.GetSampleCount())
 	mean := float64(0)
 	dev := float64(0)
@@ -218,13 +238,15 @@ func convertToDistributionValue(h *dto.Histogram) *monitoring.Distribution {
 		prevVal = b.GetCumulativeCount()
 	}
 
-	return &monitoring.Distribution{
+	return &distribution_pb.Distribution{
 		Count: count,
 		Mean:  mean,
 		SumOfSquaredDeviation: dev,
-		BucketOptions: &monitoring.BucketOptions{
-			ExplicitBuckets: &monitoring.Explicit{
-				Bounds: bounds,
+		BucketOptions: &distribution_pb.Distribution_BucketOptions{
+			Options: &distribution_pb.Distribution_BucketOptions_ExplicitBuckets{
+				ExplicitBuckets: &distribution_pb.Distribution_BucketOptions_Explicit{
+					Bounds: bounds,
+				},
 			},
 		},
 		BucketCounts: values,
@@ -246,24 +268,24 @@ func getMetricLabels(labels []*dto.LabelPair) map[string]string {
 	return metricLabels
 }
 
-func extractMetricKind(mType dto.MetricType) string {
+func extractMetricKind(mType dto.MetricType) metric_pb.MetricDescriptor_MetricKind {
 	if mType == dto.MetricType_COUNTER || mType == dto.MetricType_HISTOGRAM {
-		return "CUMULATIVE"
+		return metric_pb.MetricDescriptor_CUMULATIVE
 	}
-	return "GAUGE"
+	return metric_pb.MetricDescriptor_GAUGE
 }
 
-func extractValueType(mType dto.MetricType) string {
+func extractValueType(mType dto.MetricType) metric_pb.MetricDescriptor_ValueType {
 	if mType == dto.MetricType_HISTOGRAM {
-		return "DISTRIBUTION"
+		return metric_pb.MetricDescriptor_DISTRIBUTION
 	}
-	return "DOUBLE"
+	return metric_pb.MetricDescriptor_DOUBLE
 }
 
-func (t *Translator) getMonitoredResource(metric *dto.Metric) *monitoring.MonitoredResource {
+func (t *Translator) getMonitoredResource(metric *dto.Metric) *monitoredres_pb.MonitoredResource {
 	for _, resource := range t.resourceMappings {
 		if labels := resource.Translate(metric); labels != nil {
-			return &monitoring.MonitoredResource{
+			return &monitoredres_pb.MonitoredResource{
 				Type:   resource.Type,
 				Labels: labels,
 			}

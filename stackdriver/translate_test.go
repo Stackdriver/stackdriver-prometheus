@@ -25,9 +25,11 @@ import (
 
 	"github.com/go-kit/kit/log"
 	"github.com/gogo/protobuf/proto"
+	"github.com/golang/protobuf/ptypes/timestamp"
 	"github.com/jkohen/prometheus/retrieval"
 	dto "github.com/prometheus/client_model/go"
 	"github.com/stretchr/testify/assert"
+	metric_pb "google.golang.org/genproto/googleapis/api/metric"
 )
 
 var metricTypeGauge = dto.MetricType_GAUGE
@@ -197,21 +199,21 @@ func TestToCreateTimeSeriesRequest(t *testing.T) {
 		metric := ts[i]
 		assert.Equal(t, "gke_container", metric.Resource.Type)
 		assert.Equal(t, "metrics.prefix/test_name", metric.Metric.Type)
-		assert.Equal(t, "DOUBLE", metric.ValueType)
-		assert.Equal(t, "CUMULATIVE", metric.MetricKind)
+		assert.Equal(t, metric_pb.MetricDescriptor_DOUBLE, metric.ValueType)
+		assert.Equal(t, metric_pb.MetricDescriptor_CUMULATIVE, metric.MetricKind)
 
 		assert.Equal(t, 1, len(metric.Points))
-		assert.Equal(t, "2009-02-13T23:33:20.432Z", metric.Points[0].Interval.EndTime)
+		assert.Equal(t, &timestamp.Timestamp{Seconds: 1234568000, Nanos: 432000000}, metric.Points[0].Interval.EndTime)
 
 		labels := metric.Metric.Labels
 		assert.Equal(t, 1, len(labels))
 
 		if labels["labelName"] == "labelValue1" {
-			assert.Equal(t, "2009-02-13T23:31:30.432Z", metric.Points[0].Interval.StartTime)
-			assert.Equal(t, float64(42), *(metric.Points[0].Value.DoubleValue))
+			assert.Equal(t, &timestamp.Timestamp{Seconds: 1234567890, Nanos: 432000000}, metric.Points[0].Interval.StartTime)
+			assert.Equal(t, float64(42), metric.Points[0].Value.GetDoubleValue())
 		} else if labels["labelName"] == "labelValue2" {
-			assert.Equal(t, "2009-02-13T23:31:30.433Z", metric.Points[0].Interval.StartTime)
-			assert.Equal(t, float64(106), *(metric.Points[0].Value.DoubleValue))
+			assert.Equal(t, &timestamp.Timestamp{Seconds: 1234567890, Nanos: 433000000}, metric.Points[0].Interval.StartTime)
+			assert.Equal(t, float64(106), metric.Points[0].Value.GetDoubleValue())
 		} else {
 			t.Errorf("Wrong label labelName value %s", labels["labelName"])
 		}
@@ -222,50 +224,50 @@ func TestToCreateTimeSeriesRequest(t *testing.T) {
 		metric := ts[i]
 		assert.Equal(t, "gke_container", metric.Resource.Type)
 		assert.Equal(t, "metrics.prefix/gauge_metric", metric.Metric.Type)
-		assert.Equal(t, "DOUBLE", metric.ValueType)
-		assert.Equal(t, "GAUGE", metric.MetricKind)
+		assert.Equal(t, metric_pb.MetricDescriptor_DOUBLE, metric.ValueType)
+		assert.Equal(t, metric_pb.MetricDescriptor_GAUGE, metric.MetricKind)
 
 		labels := metric.Metric.Labels
 		assert.Equal(t, 1, len(labels))
 		if labels["labelName"] == "falseValue" {
-			assert.Equal(t, float64(0.00001), *(metric.Points[0].Value.DoubleValue))
+			assert.Equal(t, float64(0.00001), metric.Points[0].Value.GetDoubleValue())
 		} else if labels["labelName"] == "trueValue" {
-			assert.Equal(t, float64(1.2), *(metric.Points[0].Value.DoubleValue))
+			assert.Equal(t, float64(1.2), metric.Points[0].Value.GetDoubleValue())
 		} else {
 			t.Errorf("Wrong label labelName value %s", labels["labelName"])
 		}
-		assert.Equal(t, "2009-02-13T23:33:20.432Z", metric.Points[0].Interval.EndTime)
+		assert.Equal(t, &timestamp.Timestamp{Seconds: 1234568000, Nanos: 432000000}, metric.Points[0].Interval.EndTime)
 	}
 
 	// Then a single cumulative float value.
 	metric := ts[4]
 	assert.Equal(t, "gke_container", metric.Resource.Type)
 	assert.Equal(t, "metrics.prefix/float_metric", metric.Metric.Type)
-	assert.Equal(t, "DOUBLE", metric.ValueType)
-	assert.Equal(t, "CUMULATIVE", metric.MetricKind)
-	assert.InEpsilon(t, 123.17, *(metric.Points[0].Value.DoubleValue), epsilon)
+	assert.Equal(t, metric_pb.MetricDescriptor_DOUBLE, metric.ValueType)
+	assert.Equal(t, metric_pb.MetricDescriptor_CUMULATIVE, metric.MetricKind)
+	assert.InEpsilon(t, 123.17, metric.Points[0].Value.GetDoubleValue(), epsilon)
 	assert.Equal(t, 1, len(metric.Points))
-	assert.Equal(t, "2009-02-13T23:31:30.432Z", metric.Points[0].Interval.StartTime)
-	assert.Equal(t, "2009-02-13T23:33:20.432Z", metric.Points[0].Interval.EndTime)
+	assert.Equal(t, &timestamp.Timestamp{Seconds: 1234567890, Nanos: 432000000}, metric.Points[0].Interval.StartTime)
+	assert.Equal(t, &timestamp.Timestamp{Seconds: 1234568000, Nanos: 432000000}, metric.Points[0].Interval.EndTime)
 
 	// Histogram
 	metric = ts[5]
 	assert.Equal(t, "gke_container", metric.Resource.Type)
 	assert.Equal(t, "metrics.prefix/test_histogram", metric.Metric.Type)
-	assert.Equal(t, "DISTRIBUTION", metric.ValueType)
-	assert.Equal(t, "CUMULATIVE", metric.MetricKind)
+	assert.Equal(t, metric_pb.MetricDescriptor_DISTRIBUTION, metric.ValueType)
+	assert.Equal(t, metric_pb.MetricDescriptor_CUMULATIVE, metric.MetricKind)
 	assert.Equal(t, 1, len(metric.Points))
-	assert.Equal(t, "2009-02-13T23:33:20.432Z", metric.Points[0].Interval.EndTime)
+	assert.Equal(t, &timestamp.Timestamp{Seconds: 1234568000, Nanos: 432000000}, metric.Points[0].Interval.EndTime)
 
 	p := metric.Points[0]
 
-	dist := p.Value.DistributionValue
+	dist := p.Value.GetDistributionValue()
 	assert.NotNil(t, dist)
 	assert.Equal(t, int64(5), dist.Count)
 	assert.InEpsilon(t, 2.6, dist.Mean, epsilon)
 	assert.InEpsilon(t, 11.25, dist.SumOfSquaredDeviation, epsilon)
 
-	bounds := dist.BucketOptions.ExplicitBuckets.Bounds
+	bounds := dist.BucketOptions.GetExplicitBuckets().Bounds
 	assert.Equal(t, 3, len(bounds))
 	assert.InEpsilon(t, 1, bounds[0], epsilon)
 	assert.InEpsilon(t, 3, bounds[1], epsilon)
@@ -360,13 +362,13 @@ func TestK8sResourceTypes(t *testing.T) {
 
 	assert.Equal(t, "k8s_container", metric.Resource.Type)
 	assert.Equal(t, "metrics.prefix/test_name", metric.Metric.Type)
-	assert.Equal(t, "DOUBLE", metric.ValueType)
-	assert.Equal(t, "CUMULATIVE", metric.MetricKind)
+	assert.Equal(t, metric_pb.MetricDescriptor_DOUBLE, metric.ValueType)
+	assert.Equal(t, metric_pb.MetricDescriptor_CUMULATIVE, metric.MetricKind)
 
 	assert.Equal(t, 1, len(metric.Points))
-	assert.Equal(t, "2009-02-13T23:33:20.432Z", metric.Points[0].Interval.EndTime)
-	assert.Equal(t, "2009-02-13T23:31:30.432Z", metric.Points[0].Interval.StartTime)
-	assert.Equal(t, float64(1), *(metric.Points[0].Value.DoubleValue))
+	assert.Equal(t, &timestamp.Timestamp{Seconds: 1234568000, Nanos: 432000000}, metric.Points[0].Interval.EndTime)
+	assert.Equal(t, &timestamp.Timestamp{Seconds: 1234567890, Nanos: 432000000}, metric.Points[0].Interval.StartTime)
+	assert.Equal(t, float64(1), metric.Points[0].Value.GetDoubleValue())
 }
 
 func TestDropsInternalLabels(t *testing.T) {
@@ -410,11 +412,11 @@ func TestDropsInternalLabels(t *testing.T) {
 
 	metric := request.TimeSeries[0]
 	assert.Equal(t, "metrics.prefix/test_name", metric.Metric.Type)
-	assert.Equal(t, "DOUBLE", metric.ValueType)
-	assert.Equal(t, "CUMULATIVE", metric.MetricKind)
+	assert.Equal(t, metric_pb.MetricDescriptor_DOUBLE, metric.ValueType)
+	assert.Equal(t, metric_pb.MetricDescriptor_CUMULATIVE, metric.MetricKind)
 
 	assert.Equal(t, 1, len(metric.Points))
-	assert.Equal(t, "2009-02-13T23:31:30.432Z", metric.Points[0].Interval.StartTime)
+	assert.Equal(t, &timestamp.Timestamp{Seconds: 1234567890, Nanos: 432000000}, metric.Points[0].Interval.StartTime)
 
 	labels := metric.Metric.Labels
 	assert.Equal(t, 1, len(labels))
@@ -424,7 +426,7 @@ func TestDropsInternalLabels(t *testing.T) {
 	} else {
 		assert.Equal(t, "x", value)
 	}
-	assert.Equal(t, float64(42), *(metric.Points[0].Value.DoubleValue))
+	assert.Equal(t, float64(42), metric.Points[0].Value.GetDoubleValue())
 }
 
 func TestDropsMetricWithTooManyLabels(t *testing.T) {
@@ -473,10 +475,10 @@ func TestDropsMetricWithTooManyLabels(t *testing.T) {
 	// too many labels. The second one should take its place.
 	metric := request.TimeSeries[0]
 	assert.Equal(t, "metrics.prefix/test_name", metric.Metric.Type)
-	assert.Equal(t, "DOUBLE", metric.ValueType)
-	assert.Equal(t, "CUMULATIVE", metric.MetricKind)
+	assert.Equal(t, metric_pb.MetricDescriptor_DOUBLE, metric.ValueType)
+	assert.Equal(t, metric_pb.MetricDescriptor_CUMULATIVE, metric.MetricKind)
 
 	assert.Equal(t, 1, len(metric.Points))
-	assert.Equal(t, "2009-02-13T23:31:30.432Z", metric.Points[0].Interval.StartTime)
-	assert.Equal(t, float64(2), *(metric.Points[0].Value.DoubleValue))
+	assert.Equal(t, &timestamp.Timestamp{Seconds: 1234567890, Nanos: 432000000}, metric.Points[0].Interval.StartTime)
+	assert.Equal(t, float64(2), metric.Points[0].Value.GetDoubleValue())
 }
