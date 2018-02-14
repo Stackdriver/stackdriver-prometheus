@@ -157,7 +157,7 @@ items:
           action: replace
           target_label: _kubernetes_pod_container_name
       remote_write:
-      - url: "https://monitoring.googleapis.com/"
+      - url: "https://monitoring.googleapis.com:443/"
         write_relabel_configs:
         # These labels are redundant for Stackdriver.
         - source_labels: [job]
