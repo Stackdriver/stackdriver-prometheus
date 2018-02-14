@@ -35,7 +35,6 @@ import (
 	"github.com/oklog/oklog/pkg/group"
 	"github.com/pkg/errors"
 	"github.com/prometheus/client_golang/prometheus"
-	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/prometheus/common/version"
 	k8s_runtime "k8s.io/apimachinery/pkg/util/runtime"
 
@@ -150,7 +149,7 @@ func main() {
 	prometheus.MustRegister(configSuccess)
 	prometheus.MustRegister(configSuccessTime)
 
-	http.Handle("/metrics", promhttp.Handler())
+	http.Handle("/metrics", prometheus.Handler())
 
 	// sync.Once is used to make sure we can close the channel at different execution stages(SIGTERM or when the config is loaded).
 	type closeOnce struct {
