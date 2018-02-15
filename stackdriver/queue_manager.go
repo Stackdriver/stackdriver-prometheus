@@ -205,8 +205,7 @@ func NewQueueManager(logger log.Logger, cfg config.QueueConfig, externalLabels m
 // Append queues a sample to be sent to the remote storage. It drops the
 // sample on the floor if the queue is full.
 // Always returns nil.
-func (t *QueueManager) Append(sample *retrieval.MetricFamily) error {
-	metricFamily := sample.Clone() // Make a copy because we'll modify its labels in-place.
+func (t *QueueManager) Append(metricFamily *retrieval.MetricFamily) error {
 	metricFamily.Metric = t.relabelMetrics(metricFamily.Metric)
 	// Drop family if we dropped all metrics.
 	if metricFamily.Metric == nil {
