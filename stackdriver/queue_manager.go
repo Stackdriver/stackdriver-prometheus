@@ -227,13 +227,6 @@ func (t *QueueManager) Append(metricFamily *retrieval.MetricFamily) error {
 	return nil
 }
 
-// NeedsThrottling implements storage.SampleAppender. It will always return
-// false as a remote storage drops samples on the floor if backlogging instead
-// of asking for throttling.
-func (*QueueManager) NeedsThrottling() bool {
-	return false
-}
-
 // Start the queue manager sending samples to the remote storage.
 // Does not block.
 func (t *QueueManager) Start() {
@@ -334,7 +327,7 @@ func (t *QueueManager) calculateDesiredShards() {
 		level.Info(t.logger).Log("msg", "Remote storage resharding", "from", t.numShards, "to", numShards)
 		t.numShards = numShards
 	default:
-		level.Info(t.logger).Log("msg", "Currently resharding, skipping.")
+		level.Info(t.logger).Log("msg", "Currently resharding, skipping", "to", numShards)
 	}
 }
 
