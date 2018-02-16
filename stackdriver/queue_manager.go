@@ -435,8 +435,6 @@ func (s *shards) runShard(i int) {
 	// anyways.
 	pendingSamples := []*retrieval.MetricFamily{}
 
-	timer := time.NewTimer(s.qm.cfg.BatchSendDeadline)
-
 	for {
 		select {
 		case sample, ok := <-queue:
@@ -456,11 +454,7 @@ func (s *shards) runShard(i int) {
 				s.sendSamples(pendingSamples[:s.qm.cfg.MaxSamplesPerSend])
 				pendingSamples = pendingSamples[s.qm.cfg.MaxSamplesPerSend:]
 			}
-			if !timer.Stop() {
-				<-timer.C
-			}
-			timer.Reset(s.qm.cfg.BatchSendDeadline)
-		case <-timer.C:
+		case <-time.After(s.qm.cfg.BatchSendDeadline):
 			if len(pendingSamples) > 0 {
 				s.sendSamples(pendingSamples)
 				pendingSamples = pendingSamples[:0]
