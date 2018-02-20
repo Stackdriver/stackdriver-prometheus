@@ -375,7 +375,7 @@ func (s *shards) stop() {
 		close(shard)
 	}
 	s.wg.Wait()
-	level.Info(s.qm.logger).Log("msg", "Stopped resharding")
+	level.Debug(s.qm.logger).Log("msg", "Stopped resharding")
 }
 
 func fingerprint(sample *retrieval.MetricFamily) uint32 {
