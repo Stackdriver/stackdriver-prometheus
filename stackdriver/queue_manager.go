@@ -274,7 +274,7 @@ func (t *QueueManager) calculateDesiredShards() {
 	// otherwise we'll underutilize the batches. Below "send" is for one batch.
 	desiredShards := t.cfg.BatchSendDeadline.Seconds() * samplesIn / float64(t.cfg.MaxSamplesPerSend)
 
-	level.Info(t.logger).Log("msg", "QueueManager.caclulateDesiredShards",
+	level.Debug(t.logger).Log("msg", "QueueManager.caclulateDesiredShards",
 		"samplesIn", samplesIn, "desiredShards", desiredShards)
 
 	// Changes in the number of shards must be greater than shardToleranceFraction.
@@ -282,7 +282,7 @@ func (t *QueueManager) calculateDesiredShards() {
 		lowerBound = float64(t.numShards) * (1. - shardToleranceFraction)
 		upperBound = float64(t.numShards) * (1. + shardToleranceFraction)
 	)
-	level.Info(t.logger).Log("msg", "QueueManager.updateShardsLoop",
+	level.Debug(t.logger).Log("msg", "QueueManager.updateShardsLoop",
 		"lowerBound", lowerBound, "desiredShards", desiredShards, "upperBound", upperBound)
 	if lowerBound <= desiredShards && desiredShards <= upperBound {
 		return
@@ -302,10 +302,10 @@ func (t *QueueManager) calculateDesiredShards() {
 	// to stay close to shardUpdateDuration.
 	select {
 	case t.reshardChan <- numShards:
-		level.Info(t.logger).Log("msg", "Remote storage resharding", "from", t.numShards, "to", numShards)
+		level.Debug(t.logger).Log("msg", "Remote storage resharding", "from", t.numShards, "to", numShards)
 		t.numShards = numShards
 	default:
-		level.Info(t.logger).Log("msg", "Currently resharding, skipping", "to", numShards)
+		level.Debug(t.logger).Log("msg", "Currently resharding, skipping", "to", numShards)
 	}
 }
 
