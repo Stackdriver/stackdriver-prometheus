@@ -83,7 +83,7 @@ type ResourceMap struct {
 }
 
 func (m *ResourceMap) Translate(metric *dto.Metric) map[string]string {
-	stackdriverLabels := map[string]string{}
+	stackdriverLabels := make(map[string]string, len(m.LabelMap))
 	for _, label := range metric.GetLabel() {
 		if stackdriverName, ok := m.LabelMap[label.GetName()]; ok {
 			stackdriverLabels[stackdriverName] = label.GetValue()

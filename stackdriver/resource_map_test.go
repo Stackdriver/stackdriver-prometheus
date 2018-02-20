@@ -64,3 +64,37 @@ func TestTranslate(t *testing.T) {
 func makeLabelPair(name, value string) *dto.LabelPair {
 	return &dto.LabelPair{Name: proto.String(name), Value: proto.String(value)}
 }
+
+func BenchmarkTranslate(b *testing.B) {
+	b.ReportAllocs()
+	r := ResourceMap{
+		Type: "gke_container",
+		LabelMap: map[string]string{
+			ProjectIdLabel:                   "project_id",
+			"_kubernetes_location":           "zone",
+			"_kubernetes_cluster_name":       "cluster_name",
+			"_kubernetes_namespace":          "namespace_id",
+			"_kubernetes_pod_name":           "pod_id",
+			"_kubernetes_pod_node_name":      "instance_id",
+			"_kubernetes_pod_container_name": "container_name",
+		},
+	}
+	metric := dto.Metric{
+		Label: []*dto.LabelPair{
+			makeLabelPair(ProjectIdLabel, "1:anoeuh oeusoeh uasoeuh"),
+			makeLabelPair("_kubernetes_location", "2:anoeuh oeusoeh uasoeuh"),
+			makeLabelPair("_kubernetes_cluster_name", "3:anoeuh oeusoeh uasoeuh"),
+			makeLabelPair("_kubernetes_namespace", "4:anoeuh oeusoeh uasoeuh"),
+			makeLabelPair("_kubernetes_pod_name", "5:anoeuh oeusoeh uasoeuh"),
+			makeLabelPair("_kubernetes_pod_node_name", "6:anoeuh oeusoeh uasoeuh"),
+			makeLabelPair("_kubernetes_pod_container_name", "7:anoeuh oeusoeh uasoeuh"),
+			makeLabelPair("ignored", "8:anoeuh oeusoeh uasoeuh"),
+		},
+	}
+
+	for i := 0; i < b.N; i++ {
+		if labels := r.Translate(&metric); labels == nil {
+			b.Fail()
+		}
+	}
+}
