@@ -45,6 +45,7 @@ const (
 	shardUpdateDuration = 10 * time.Second
 
 	// Allow 30% too many shards before scaling down.
+	// TODO(jkohen): now that resharding is cheap, it may be worth reducing this to give more stable performance.
 	shardToleranceFraction = 0.3
 
 	// Limit to 1 log event every 10s
@@ -158,8 +159,7 @@ type QueueManager struct {
 	quit        chan struct{}
 	wg          sync.WaitGroup
 
-	samplesIn, samplesOut, samplesOutDuration *ewmaRate
-	integralAccumulator                       float64
+	samplesIn *ewmaRate
 }
 
 // NewQueueManager builds a new QueueManager.
@@ -185,9 +185,7 @@ func NewQueueManager(logger log.Logger, cfg config.QueueConfig, externalLabels m
 		reshardChan: make(chan int),
 		quit:        make(chan struct{}),
 
-		samplesIn:          newEWMARate(ewmaWeight, shardUpdateDuration),
-		samplesOut:         newEWMARate(ewmaWeight, shardUpdateDuration),
-		samplesOutDuration: newEWMARate(ewmaWeight, shardUpdateDuration),
+		samplesIn: newEWMARate(ewmaWeight, shardUpdateDuration),
 	}
 	t.shards = t.newShards(t.numShards)
 	numShards.WithLabelValues(t.queueName).Set(float64(t.numShards))
@@ -213,17 +211,10 @@ func (t *QueueManager) Append(metricFamily *retrieval.MetricFamily) error {
 	}
 
 	t.shardsMtx.Lock()
-	enqueued := t.shards.enqueue(metricFamily)
+	t.shards.enqueue(metricFamily)
 	t.shardsMtx.Unlock()
 
-	if enqueued {
-		queueLength.WithLabelValues(t.queueName).Inc()
-	} else {
-		droppedSamplesTotal.WithLabelValues(t.queueName).Inc()
-		if t.logLimiter.Allow() {
-			level.Warn(t.logger).Log("msg", "Remote storage queue full, discarding sample. Multiple subsequent messages of this kind may be suppressed.")
-		}
-	}
+	queueLength.WithLabelValues(t.queueName).Inc()
 	return nil
 }
 
@@ -270,41 +261,28 @@ func (t *QueueManager) updateShardsLoop() {
 
 func (t *QueueManager) calculateDesiredShards() {
 	t.samplesIn.tick()
-	t.samplesOut.tick()
-	t.samplesOutDuration.tick()
 
 	// We use the number of incoming samples as a prediction of how much work we
 	// will need to do next iteration.  We add to this any pending samples
 	// (received - send) so we can catch up with any backlog. We use the average
 	// outgoing batch latency to work out how many shards we need.
-	var (
-		samplesIn          = t.samplesIn.rate()
-		samplesOut         = t.samplesOut.rate()
-		samplesPending     = samplesIn - samplesOut
-		samplesOutDuration = t.samplesOutDuration.rate()
-	)
+	// These rates are samples per second.
+	samplesIn := t.samplesIn.rate()
 
-	// We use an integral accumulator, like in a PID, to help dampen oscillation.
-	t.integralAccumulator = t.integralAccumulator + (samplesPending * 0.1)
+	// Size the shards so that they can fit enough samples to keep
+	// good flow, but not more than the batch send deadline,
+	// otherwise we'll underutilize the batches. Below "send" is for one batch.
+	desiredShards := t.cfg.BatchSendDeadline.Seconds() * samplesIn / float64(t.cfg.MaxSamplesPerSend)
 
-	if samplesOut <= 0 {
-		return
-	}
-
-	var (
-		timePerSample = samplesOutDuration / samplesOut
-		desiredShards = (timePerSample * (samplesIn + samplesPending + t.integralAccumulator)) / float64(time.Second)
-	)
-	level.Debug(t.logger).Log("msg", "QueueManager.caclulateDesiredShards",
-		"samplesIn", samplesIn, "samplesOut", samplesOut,
-		"samplesPending", samplesPending, "desiredShards", desiredShards)
+	level.Info(t.logger).Log("msg", "QueueManager.caclulateDesiredShards",
+		"samplesIn", samplesIn, "desiredShards", desiredShards)
 
 	// Changes in the number of shards must be greater than shardToleranceFraction.
 	var (
 		lowerBound = float64(t.numShards) * (1. - shardToleranceFraction)
 		upperBound = float64(t.numShards) * (1. + shardToleranceFraction)
 	)
-	level.Debug(t.logger).Log("msg", "QueueManager.updateShardsLoop",
+	level.Info(t.logger).Log("msg", "QueueManager.updateShardsLoop",
 		"lowerBound", lowerBound, "desiredShards", desiredShards, "upperBound", upperBound)
 	if lowerBound <= desiredShards && desiredShards <= upperBound {
 		return
@@ -397,6 +375,7 @@ func (s *shards) stop() {
 		close(shard)
 	}
 	s.wg.Wait()
+	level.Info(s.qm.logger).Log("msg", "Stopped resharding")
 }
 
 func fingerprint(sample *retrieval.MetricFamily) uint32 {
@@ -405,18 +384,12 @@ func fingerprint(sample *retrieval.MetricFamily) uint32 {
 	return h.Sum32()
 }
 
-func (s *shards) enqueue(sample *retrieval.MetricFamily) bool {
+func (s *shards) enqueue(sample *retrieval.MetricFamily) {
 	s.qm.samplesIn.incr(1)
 
 	fp := fingerprint(sample)
 	shard := uint64(fp) % uint64(len(s.queues))
-
-	select {
-	case s.queues[shard] <- sample:
-		return true
-	default:
-		return false
-	}
+	s.queues[shard] <- sample
 }
 
 func (s *shards) runShard(i int) {
@@ -456,18 +429,8 @@ func (s *shards) runShard(i int) {
 	}
 }
 
-func (s *shards) sendSamples(samples []*retrieval.MetricFamily) {
-	begin := time.Now()
-	s.sendSamplesWithBackoff(samples)
-
-	// These counters are used to caclulate the dynamic sharding, and as such
-	// should be maintained irrespective of success or failure.
-	s.qm.samplesOut.incr(int64(len(samples)))
-	s.qm.samplesOutDuration.incr(int64(time.Since(begin)))
-}
-
 // sendSamples to the remote storage with backoff for recoverable errors.
-func (s *shards) sendSamplesWithBackoff(samples []*retrieval.MetricFamily) {
+func (s *shards) sendSamples(samples []*retrieval.MetricFamily) {
 	backoff := s.qm.cfg.MinBackoff
 	translator := NewTranslator(s.qm.logger, metricsPrefix, s.qm.resourceMappings)
 	for retries := s.qm.cfg.MaxRetries; retries > 0; retries-- {

@@ -116,8 +116,7 @@ func (c *TestStorageClient) Name() string {
 func TestSampleDelivery(t *testing.T) {
 	// Let's create an even number of send batches so we don't run into the
 	// batch timeout case.
-	capacity := 100
-	n := capacity * 2
+	n := 100
 
 	samples := make([]sample, 0, n)
 	for i := 0; i < n; i++ {
@@ -126,19 +125,15 @@ func TestSampleDelivery(t *testing.T) {
 	}
 
 	c := NewTestStorageClient()
-	c.expectSamples(samples[:len(samples)/2])
+	c.expectSamples(samples)
 
 	cfg := config.DefaultQueueConfig
-	cfg.MaxShards = 1
-	cfg.Capacity = capacity
+	cfg.Capacity = n
+	cfg.MaxSamplesPerSend = n
 	m := NewQueueManager(nil, cfg, nil, nil, c, &DefaultStackdriverConfig)
 
 	// These should be received by the client.
-	for _, s := range samples[:len(samples)/2] {
-		m.Append(sampleToMetricFamily(s))
-	}
-	// These will be dropped because the queue is full.
-	for _, s := range samples[len(samples)/2:] {
+	for _, s := range samples {
 		m.Append(sampleToMetricFamily(s))
 	}
 	m.Start()
@@ -220,12 +215,12 @@ func TestSampleDeliveryOrder(t *testing.T) {
 	c.expectSamples(samples)
 	m := NewQueueManager(nil, config.DefaultQueueConfig, nil, nil, c, &DefaultStackdriverConfig)
 
+	m.Start()
+	defer m.Stop()
 	// These should be received by the client.
 	for _, s := range samples {
 		m.Append(sampleToMetricFamily(s))
 	}
-	m.Start()
-	defer m.Stop()
 
 	c.waitForExpectedSamples(t)
 }
@@ -234,12 +229,13 @@ func TestSampleDeliveryOrder(t *testing.T) {
 // (e.g. because all metric types are unsupported), and therefore there is
 // nothing to send to the storage.
 func TestStoreEmptyRequest(t *testing.T) {
-	ts := 10
-	n := config.DefaultQueueConfig.MaxSamplesPerSend * ts
+	// Let's create an even number of send batches so we don't run into the
+	// batch timeout case.
+	n := 100
 
 	samples := make([]sample, 0, n)
 	for i := 0; i < n; i++ {
-		name := fmt.Sprintf("test_metric_%d", i%ts)
+		name := fmt.Sprintf("test_metric_%d", i)
 		samples = append(samples, sample{Name: name, Labels: map[string]string{}, Value: float64(i)})
 	}
 
