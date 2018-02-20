@@ -1219,3 +1219,17 @@ func addMetricLabels(metricFamily *MetricFamily, labelName, labelValue string) *
 	}
 	return metricFamily
 }
+
+func BenchmarkLabelsToLabelPairs(b *testing.B) {
+	b.ReportAllocs()
+	lset := labels.FromMap(map[string]string{
+		"label1": "1:foo oaeu aoeu aoeu aoeu ou",
+		"label2": "2:foo oaeu aoeu aoeu aoeu ou",
+		"label3": "3:foo oaeu aoeu aoeu aoeu ou",
+		"label4": "4:foo oaeu aoeu aoeu aoeu ou",
+		"label5": "5:foo oaeu aoeu aoeu aoeu ou",
+	})
+	for i := 0; i < b.N; i++ {
+		labelsToLabelPairs(lset)
+	}
+}

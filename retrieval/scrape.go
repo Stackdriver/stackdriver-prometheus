@@ -827,12 +827,15 @@ func labelPairsToLabels(input []*dto.LabelPair) (output labels.Labels) {
 }
 
 func labelsToLabelPairs(lset labels.Labels) []*dto.LabelPair {
-	var labelPairs []*dto.LabelPair
-	for _, label := range lset {
-		labelPairs = append(labelPairs, &dto.LabelPair{
-			Name:  proto.String(label.Name),
-			Value: proto.String(label.Value),
-		})
+	if len(lset) == 0 {
+		return nil
+	}
+	labelPairs := make([]*dto.LabelPair, len(lset))
+	for i := range lset {
+		labelPairs[i] = &dto.LabelPair{
+			Name:  &lset[i].Name,
+			Value: &lset[i].Value,
+		}
 	}
 	return labelPairs
 }
