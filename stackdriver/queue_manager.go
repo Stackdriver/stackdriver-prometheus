@@ -19,18 +19,17 @@ import (
 	"sync"
 	"time"
 
-	"github.com/golang/protobuf/proto"
-	"github.com/jkohen/prometheus/retrieval"
-	dto "github.com/prometheus/client_model/go"
-	"golang.org/x/time/rate"
-	monitoring "google.golang.org/genproto/googleapis/monitoring/v3"
-
 	"github.com/go-kit/kit/log"
 	"github.com/go-kit/kit/log/level"
+	"github.com/jkohen/prometheus/retrieval"
 	"github.com/prometheus/client_golang/prometheus"
+	dto "github.com/prometheus/client_model/go"
 	"github.com/prometheus/common/model"
 	"github.com/prometheus/prometheus/config"
-	"github.com/prometheus/prometheus/relabel"
+	"github.com/prometheus/prometheus/pkg/labels"
+	"github.com/prometheus/prometheus/pkg/relabel"
+	"golang.org/x/time/rate"
+	monitoring "google.golang.org/genproto/googleapis/monitoring/v3"
 )
 
 // String constants for instrumentation.
@@ -462,46 +461,34 @@ func (s *shards) sendSamples(samples []*retrieval.MetricFamily) {
 func (t *QueueManager) relabelMetrics(inputMetrics []*dto.Metric) []*dto.Metric {
 	metrics := []*dto.Metric{}
 	for _, metric := range inputMetrics {
-		lset := labelPairsToLabels(metric.Label)
+		metricLabels := retrieval.LabelPairsToLabels(metric.Label)
 
 		// Add any external labels. If an external label name is already
 		// found in the set of metric labels, don't add that label.
+		lset := make(map[string]struct{})
+		for i := range metricLabels {
+			lset[metricLabels[i].Name] = struct{}{}
+		}
 		for ln, lv := range t.externalLabels {
-			if _, ok := lset[ln]; !ok {
-				lset[ln] = lv
+			if _, ok := lset[string(ln)]; !ok {
+				metricLabels = append(metricLabels, labels.Label{
+					Name:  string(ln),
+					Value: string(lv),
+				})
 			}
 		}
 
-		lset = relabel.Process(lset, t.relabelConfigs...)
+		metricLabels = relabel.Process(metricLabels, t.relabelConfigs...)
 
 		// The label set may be set to nil to indicate dropping.
-		if lset == nil {
+		if metricLabels == nil {
 			continue
 		}
-		metric.Label = labelsToLabelPairs(lset)
+		metric.Label = retrieval.LabelsToLabelPairs(metricLabels)
 		metrics = append(metrics, metric)
 	}
 	if len(metrics) == 0 {
 		return nil
 	}
 	return metrics
-}
-
-func labelPairsToLabels(input []*dto.LabelPair) (output model.LabelSet) {
-	output = make(model.LabelSet)
-	for _, label := range input {
-		output[model.LabelName(label.GetName())] = model.LabelValue(label.GetValue())
-	}
-	return
-}
-
-func labelsToLabelPairs(input model.LabelSet) (output []*dto.LabelPair) {
-	output = make([]*dto.LabelPair, 0, len(input))
-	for ln, lv := range input {
-		output = append(output, &dto.LabelPair{
-			Name:  proto.String(string(ln)),
-			Value: proto.String(string(lv)),
-		})
-	}
-	return
 }

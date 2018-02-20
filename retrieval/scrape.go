@@ -33,8 +33,6 @@ import (
 	"github.com/prometheus/common/expfmt"
 	"github.com/prometheus/common/model"
 	"github.com/prometheus/common/version"
-	"golang.org/x/net/context/ctxhttp"
-
 	"github.com/prometheus/prometheus/config"
 	"github.com/prometheus/prometheus/discovery/targetgroup"
 	"github.com/prometheus/prometheus/pkg/labels"
@@ -42,6 +40,7 @@ import (
 	"github.com/prometheus/prometheus/pkg/relabel"
 	"github.com/prometheus/prometheus/pkg/timestamp"
 	"github.com/prometheus/prometheus/util/httputil"
+	"golang.org/x/net/context/ctxhttp"
 )
 
 var (
@@ -778,7 +777,7 @@ func (sl *scrapeLoop) addReportSample(app Appender, name string, t int64, v floa
 					Value: proto.Float64(v),
 				},
 				TimestampMs: proto.Int64(t),
-				Label:       labelsToLabelPairs(lset),
+				Label:       LabelsToLabelPairs(lset),
 			},
 		},
 	}
@@ -797,7 +796,7 @@ func (sl *scrapeLoop) addReportSample(app Appender, name string, t int64, v floa
 func relabelMetrics(inputMetrics []*dto.Metric, mutator labelsMutator) []*dto.Metric {
 	metrics := []*dto.Metric{}
 	for _, metric := range inputMetrics {
-		lset := labelPairsToLabels(metric.Label)
+		lset := LabelPairsToLabels(metric.Label)
 
 		// Add target labels and relabeling and store the final label set.
 		lset = mutator(lset)
@@ -806,38 +805,13 @@ func relabelMetrics(inputMetrics []*dto.Metric, mutator labelsMutator) []*dto.Me
 			continue
 		}
 
-		metric.Label = labelsToLabelPairs(lset)
+		metric.Label = LabelsToLabelPairs(lset)
 		metrics = append(metrics, metric)
 	}
 	if len(metrics) == 0 {
 		return nil
 	}
 	return metrics
-}
-
-func labelPairsToLabels(input []*dto.LabelPair) (output labels.Labels) {
-	output = make(labels.Labels, 0, len(input))
-	for _, label := range input {
-		output = append(output, labels.Label{
-			Name:  label.GetName(),
-			Value: label.GetValue(),
-		})
-	}
-	return
-}
-
-func labelsToLabelPairs(lset labels.Labels) []*dto.LabelPair {
-	if len(lset) == 0 {
-		return nil
-	}
-	labelPairs := make([]*dto.LabelPair, len(lset))
-	for i := range lset {
-		labelPairs[i] = &dto.LabelPair{
-			Name:  &lset[i].Name,
-			Value: &lset[i].Value,
-		}
-	}
-	return labelPairs
 }
 
 type pointExtractor struct {
@@ -867,7 +841,7 @@ func (m *pointExtractor) UpdateValue(family *dto.MetricFamily, metric *dto.Metri
 		return
 	}
 	key := NewResetPointKey(
-		family.GetName(), labelPairsToLabels(metric.Label), family.GetType())
+		family.GetName(), LabelPairsToLabels(metric.Label), family.GetType())
 	value := valueFromMetric(metric)
 	if m.firstScrape {
 		m.resetPointMap.AddResetPoint(key, Point{
