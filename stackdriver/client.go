@@ -22,6 +22,7 @@ import (
 
 	monitoring "google.golang.org/genproto/googleapis/monitoring/v3"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/balancer/roundrobin"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/oauth"
@@ -66,7 +67,11 @@ func NewClient(index int, conf *ClientConfig) (*Client, error) {
 	if logger == nil {
 		logger = log.NewNopLogger()
 	}
-	dopts := []grpc.DialOption{}
+	// TODO(jkohen): Google APIs return a single IP for the whole
+	// service. In order to get proper load-balancing of the transport, we
+	// want more clients. We should probably create one client per shard
+	// within QueueManager, or an unbounded pool of connections here.
+	dopts := []grpc.DialOption{grpc.WithBalancerName(roundrobin.Name)}
 	if conf.Auth {
 		rpcCreds, err := oauth.NewApplicationDefault(context.Background(), MonitoringWriteScope)
 		if err != nil {
