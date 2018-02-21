@@ -18,6 +18,7 @@ package retrieval
 import (
 	"errors"
 	"fmt"
+	"sort"
 
 	"github.com/gogo/protobuf/proto"
 	dto "github.com/prometheus/client_model/go"
@@ -56,6 +57,33 @@ func (f *MetricFamily) Clone() (o *MetricFamily) {
 func (f *MetricFamily) String() string {
 	return fmt.Sprintf("MetricFamily<dto.MetricFamily: %v MetricResetTimestampMs: %v>",
 		f.MetricFamily, f.MetricResetTimestampMs)
+}
+
+// SeparatorByte is a byte that cannot occur in valid UTF-8 sequences and is
+// used to separate label names, label values, and other strings from each other
+// when calculating their combined hash value (aka signature aka fingerprint).
+const SeparatorByte byte = 255
+
+// ByName implements sort.Interface for []*MetricFamily based on the Name field.
+type LabelPairsByName []*dto.LabelPair
+
+func (f LabelPairsByName) Len() int           { return len(f) }
+func (f LabelPairsByName) Swap(i, j int)      { f[i], f[j] = f[j], f[i] }
+func (f LabelPairsByName) Less(i, j int) bool { return f[i].GetName() < f[j].GetName() }
+
+func (f *MetricFamily) Fingerprint() uint64 {
+	h := hashNew()
+	h = hashAdd(h, f.GetName())
+	for _, metric := range f.GetMetric() {
+		sort.Sort(LabelPairsByName(metric.GetLabel()))
+		for _, label := range metric.GetLabel() {
+			h = hashAddByte(h, SeparatorByte)
+			h = hashAdd(h, label.GetName())
+			h = hashAddByte(h, SeparatorByte)
+			h = hashAdd(h, label.GetValue())
+		}
+	}
+	return h
 }
 
 type Appender interface {

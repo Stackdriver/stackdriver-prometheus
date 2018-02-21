@@ -14,7 +14,6 @@
 package stackdriver
 
 import (
-	"hash/fnv"
 	"math"
 	"sync"
 	"time"
@@ -210,7 +209,18 @@ func (t *QueueManager) Append(metricFamily *retrieval.MetricFamily) error {
 	}
 
 	t.shardsMtx.Lock()
-	t.shards.enqueue(metricFamily)
+	for i := range metricFamily.Metric {
+		metricFamilySlice := &retrieval.MetricFamily{
+			MetricFamily: &dto.MetricFamily{
+				Name:   metricFamily.Name,
+				Help:   metricFamily.Help,
+				Type:   metricFamily.Type,
+				Metric: metricFamily.Metric[i : i+1],
+			},
+			MetricResetTimestampMs: metricFamily.MetricResetTimestampMs[i : i+1],
+		}
+		t.shards.enqueue(metricFamilySlice)
+	}
 	t.shardsMtx.Unlock()
 
 	queueLength.WithLabelValues(t.queueName).Inc()
@@ -377,17 +387,11 @@ func (s *shards) stop() {
 	level.Debug(s.qm.logger).Log("msg", "Stopped resharding")
 }
 
-func fingerprint(sample *retrieval.MetricFamily) uint32 {
-	h := fnv.New32a()
-	h.Write([]byte(sample.GetName()))
-	return h.Sum32()
-}
-
 func (s *shards) enqueue(sample *retrieval.MetricFamily) {
 	s.qm.samplesIn.incr(1)
 
-	fp := fingerprint(sample)
-	shard := uint64(fp) % uint64(len(s.queues))
+	fp := sample.Fingerprint()
+	shard := fp % uint64(len(s.queues))
 	s.queues[shard] <- sample
 }
 
