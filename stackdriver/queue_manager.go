@@ -150,7 +150,7 @@ type QueueManager struct {
 	logLimiter       *rate.Limiter
 	resourceMappings []ResourceMap
 
-	shardsMtx   sync.Mutex
+	shardsMtx   sync.RWMutex
 	shards      *shards
 	numShards   int
 	reshardChan chan int
@@ -208,7 +208,7 @@ func (t *QueueManager) Append(metricFamily *retrieval.MetricFamily) error {
 		return nil
 	}
 
-	t.shardsMtx.Lock()
+	t.shardsMtx.RLock()
 	for i := range metricFamily.Metric {
 		metricFamilySlice := &retrieval.MetricFamily{
 			MetricFamily: &dto.MetricFamily{
@@ -221,7 +221,7 @@ func (t *QueueManager) Append(metricFamily *retrieval.MetricFamily) error {
 		}
 		t.shards.enqueue(metricFamilySlice)
 	}
-	t.shardsMtx.Unlock()
+	t.shardsMtx.RUnlock()
 
 	queueLength.WithLabelValues(t.queueName).Inc()
 	return nil
@@ -283,7 +283,7 @@ func (t *QueueManager) calculateDesiredShards() {
 	// otherwise we'll underutilize the batches. Below "send" is for one batch.
 	desiredShards := t.cfg.BatchSendDeadline.Seconds() * samplesIn / float64(t.cfg.Capacity)
 
-	level.Debug(t.logger).Log("msg", "QueueManager.caclulateDesiredShards",
+	level.Info(t.logger).Log("msg", "QueueManager.caclulateDesiredShards", // DO NOT SUBMIT
 		"samplesIn", samplesIn, "desiredShards", desiredShards)
 
 	// Changes in the number of shards must be greater than shardToleranceFraction.
@@ -291,7 +291,7 @@ func (t *QueueManager) calculateDesiredShards() {
 		lowerBound = float64(t.numShards) * (1. - shardToleranceFraction)
 		upperBound = float64(t.numShards) * (1. + shardToleranceFraction)
 	)
-	level.Debug(t.logger).Log("msg", "QueueManager.updateShardsLoop",
+	level.Info(t.logger).Log("msg", "QueueManager.updateShardsLoop", // DO NOT SUBMIT
 		"lowerBound", lowerBound, "desiredShards", desiredShards, "upperBound", upperBound)
 	if lowerBound <= desiredShards && desiredShards <= upperBound {
 		return
