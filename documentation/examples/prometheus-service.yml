@@ -160,10 +160,8 @@ items:
       - url: "https://monitoring.googleapis.com:443/"
         queue_config:
           # Capacity should be 2*max_samples_per_send.
-          capacity: 200
-          max_samples_per_send: 100
-          # Sharding currently works on the metric name, so setting max_shards higher than the
-          # number of metrics will make little difference.
+          capacity: 400
+          max_samples_per_send: 200
           max_shards: 10000
         write_relabel_configs:
         # These labels are redundant for Stackdriver.
