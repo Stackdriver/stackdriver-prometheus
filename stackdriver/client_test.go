@@ -109,7 +109,12 @@ func TestStoreErrorHandling(t *testing.T) {
 }
 
 func TestEmptyRequest(t *testing.T) {
+	serverURL, err := url.Parse("http://localhost:12345")
+	if err != nil {
+		t.Fatal(err)
+	}
 	c, err := NewClient(0, &ClientConfig{
+		URL:     &config_util.URL{URL: serverURL},
 		Timeout: model.Duration(time.Second),
 	})
 	if err != nil {

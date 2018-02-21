@@ -135,6 +135,8 @@ type StorageClient interface {
 	Store(*monitoring.CreateTimeSeriesRequest) error
 	// Name identifies the remote storage implementation.
 	Name() string
+	// Release the resources allocated by the client.
+	Close() error
 }
 
 // QueueManager manages a queue of samples to be sent to the Storage
@@ -249,6 +251,8 @@ func (t *QueueManager) Stop() {
 	t.shardsMtx.Lock()
 	defer t.shardsMtx.Unlock()
 	t.shards.stop()
+
+	t.client.Close()
 
 	level.Info(t.logger).Log("msg", "Remote storage stopped.")
 }

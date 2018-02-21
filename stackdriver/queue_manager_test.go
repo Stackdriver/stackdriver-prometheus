@@ -113,6 +113,11 @@ func (c *TestStorageClient) Name() string {
 	return "teststorageclient"
 }
 
+func (c *TestStorageClient) Close() error {
+	c.wg.Wait()
+	return nil
+}
+
 func TestSampleDelivery(t *testing.T) {
 	// Let's create an even number of send batches so we don't run into the
 	// batch timeout case.
@@ -295,6 +300,10 @@ func (c *TestBlockingStorageClient) unlock() {
 
 func (c *TestBlockingStorageClient) Name() string {
 	return "testblockingstorageclient"
+}
+
+func (c *TestBlockingStorageClient) Close() error {
+	return nil
 }
 
 func (t *QueueManager) queueLen() int {

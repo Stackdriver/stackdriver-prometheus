@@ -48,7 +48,7 @@ type Client struct {
 	projectId string
 	url       *config_util.URL
 	timeout   time.Duration
-	dopts     []grpc.DialOption
+	conn      *grpc.ClientConn
 }
 
 // ClientConfig configures a Client.
@@ -79,13 +79,21 @@ func NewClient(index int, conf *ClientConfig) (*Client, error) {
 	} else {
 		dopts = append(dopts, grpc.WithInsecure())
 	}
+	address := conf.URL.Hostname()
+	if len(conf.URL.Port()) > 0 {
+		address = fmt.Sprintf("%s:%s", address, conf.URL.Port())
+	}
+	conn, err := grpc.Dial(address, dopts...)
+	if err != nil {
+		return nil, err
+	}
 	return &Client{
 		index:     index,
 		logger:    logger,
 		projectId: conf.ProjectId,
 		url:       conf.URL,
 		timeout:   time.Duration(conf.Timeout),
-		dopts:     dopts,
+		conn:      conn,
 	}, nil
 }
 
@@ -104,19 +112,8 @@ func (c *Client) Store(req *monitoring.CreateTimeSeriesRequest) error {
 	ctx, cancel := context.WithTimeout(context.Background(), c.timeout)
 	defer cancel()
 
-	address := c.url.Hostname()
-	if len(c.url.Port()) > 0 {
-		address = fmt.Sprintf("%s:%s", address, c.url.Port())
-	}
-	level.Debug(c.logger).Log(
-		"msg", "sending request to Stackdriver",
-		"address", address)
-	conn, err := grpc.Dial(address, c.dopts...)
-	if err != nil {
-		return err
-	}
-	defer conn.Close()
-	service := monitoring.NewMetricServiceClient(conn)
+	level.Debug(c.logger).Log("msg", "sending request to Stackdriver")
+	service := monitoring.NewMetricServiceClient(c.conn)
 
 	errors := make(chan error, len(tss)/maxTimeseriesesPerRequest+1)
 	var wg sync.WaitGroup
@@ -163,4 +160,9 @@ func (c *Client) Store(req *monitoring.CreateTimeSeriesRequest) error {
 // Name identifies the client.
 func (c Client) Name() string {
 	return fmt.Sprintf("%d:%s", c.index, c.url)
+}
+
+// TODO(jkohen): call this thing
+func (c Client) Close() error {
+	return c.conn.Close()
 }
