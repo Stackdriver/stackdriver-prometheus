@@ -271,7 +271,7 @@ func (t *QueueManager) calculateDesiredShards() {
 	// Size the shards so that they can fit enough samples to keep
 	// good flow, but not more than the batch send deadline,
 	// otherwise we'll underutilize the batches. Below "send" is for one batch.
-	desiredShards := t.cfg.BatchSendDeadline.Seconds() * samplesIn / float64(t.cfg.MaxSamplesPerSend)
+	desiredShards := t.cfg.BatchSendDeadline.Seconds() * samplesIn / float64(t.cfg.Capacity)
 
 	level.Debug(t.logger).Log("msg", "QueueManager.caclulateDesiredShards",
 		"samplesIn", samplesIn, "desiredShards", desiredShards)
