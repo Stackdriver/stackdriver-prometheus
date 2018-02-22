@@ -74,9 +74,7 @@ func (t *Translator) ToCreateTimeSeriesRequest(
 	// TODO(jkohen): See if it's possible for Prometheus to pass two points
 	// for the same time series, which isn't accepted by the Stackdriver
 	// Monitoring API.
-	request := &monitoring_pb.CreateTimeSeriesRequest{
-		TimeSeries: []*monitoring_pb.TimeSeries{},
-	}
+	request := &monitoring_pb.CreateTimeSeriesRequest{}
 	for _, family := range metrics {
 		tss, err := t.translateFamily(family)
 		if err != nil {
