@@ -261,7 +261,7 @@ func convertToDistributionValue(h *dto.Histogram) *distribution_pb.Distribution 
 func getMetricLabels(labels []*dto.LabelPair) map[string]string {
 	metricLabels := map[string]string{}
 	for _, label := range labels {
-		if strings.HasPrefix(string(label.GetName()), "_") {
+		if strings.HasPrefix(label.GetName(), "_") {
 			continue
 		}
 		metricLabels[label.GetName()] = label.GetValue()
