@@ -213,8 +213,8 @@ func convertToDistributionValue(h *dto.Histogram) *distribution_pb.Distribution 
 	count := int64(h.GetSampleCount())
 	mean := float64(0)
 	dev := float64(0)
-	bounds := []float64{}
-	values := []int64{}
+	bounds := make([]float64, 0, len(h.Bucket))
+	values := make([]int64, 0, len(h.Bucket))
 
 	if count > 0 {
 		mean = h.GetSampleSum() / float64(count)
@@ -224,10 +224,10 @@ func convertToDistributionValue(h *dto.Histogram) *distribution_pb.Distribution 
 	lower := float64(0)
 	for _, b := range h.Bucket {
 		upper := b.GetUpperBound()
-		if !math.IsInf(b.GetUpperBound(), 1) {
-			bounds = append(bounds, b.GetUpperBound())
-		} else {
+		if math.IsInf(upper, 1) {
 			upper = lower
+		} else {
+			bounds = append(bounds, upper)
 		}
 		val := b.GetCumulativeCount() - prevVal
 		x := (lower + upper) / float64(2)
