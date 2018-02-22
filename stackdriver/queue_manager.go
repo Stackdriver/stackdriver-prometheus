@@ -353,10 +353,11 @@ func (t *QueueManager) reshard(n int) {
 }
 
 type shards struct {
-	qm     *QueueManager
-	queues []chan *retrieval.MetricFamily
-	done   chan struct{}
-	wg     sync.WaitGroup
+	qm         *QueueManager
+	translator *Translator
+	queues     []chan *retrieval.MetricFamily
+	done       chan struct{}
+	wg         sync.WaitGroup
 }
 
 func (t *QueueManager) newShards(numShards int) *shards {
@@ -365,9 +366,10 @@ func (t *QueueManager) newShards(numShards int) *shards {
 		queues[i] = make(chan *retrieval.MetricFamily, t.cfg.Capacity)
 	}
 	s := &shards{
-		qm:     t,
-		queues: queues,
-		done:   make(chan struct{}),
+		qm:         t,
+		translator: NewTranslator(t.logger, metricsPrefix, t.resourceMappings),
+		queues:     queues,
+		done:       make(chan struct{}),
 	}
 	s.wg.Add(numShards)
 	return s
@@ -439,10 +441,9 @@ func (s *shards) runShard(i int) {
 // sendSamples to the remote storage with backoff for recoverable errors.
 func (s *shards) sendSamples(samples []*retrieval.MetricFamily) {
 	backoff := s.qm.cfg.MinBackoff
-	translator := NewTranslator(s.qm.logger, metricsPrefix, s.qm.resourceMappings)
 	for retries := s.qm.cfg.MaxRetries; retries > 0; retries-- {
 		begin := time.Now()
-		req := translator.ToCreateTimeSeriesRequest(samples)
+		req := s.translator.ToCreateTimeSeriesRequest(samples)
 		err := s.qm.client.Store(req)
 
 		sentBatchDuration.WithLabelValues(s.qm.queueName).Observe(time.Since(begin).Seconds())
