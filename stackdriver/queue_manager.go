@@ -42,9 +42,8 @@ const (
 	ewmaWeight          = 0.2
 	shardUpdateDuration = 10 * time.Second
 
-	// Allow 30% too many shards before scaling down.
-	// TODO(jkohen): now that resharding is cheap, it may be worth reducing this to give more stable performance.
-	shardToleranceFraction = 0.3
+	// Allow 10% too many shards before scaling down.
+	shardToleranceFraction = 0.1
 
 	// Limit to 1 log event every 10s
 	logRateLimit = 0.1
