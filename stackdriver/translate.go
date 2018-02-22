@@ -118,7 +118,8 @@ func (t *Translator) translateFamily(family *retrieval.MetricFamily) ([]*monitor
 
 // getMetricType creates metric type name base on the metric prefix, and metric name.
 func getMetricType(metricsPrefix string, name string) string {
-	return fmt.Sprintf("%s/%s", metricsPrefix, name)
+	// This does no allocations, versus 12 with fmt.Sprintf.
+	return metricsPrefix + "/" + name
 }
 
 func getTimestamp(ts time.Time) *timestamp_pb.Timestamp {

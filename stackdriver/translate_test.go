@@ -482,3 +482,12 @@ func TestDropsMetricWithTooManyLabels(t *testing.T) {
 	assert.Equal(t, &timestamp.Timestamp{Seconds: 1234567890, Nanos: 432000000}, metric.Points[0].Interval.StartTime)
 	assert.Equal(t, float64(2), metric.Points[0].Value.GetDoubleValue())
 }
+
+func BenchmarkToCreateTimeSeriesRequest(b *testing.B) {
+	b.ReportAllocs()
+	output := &bytes.Buffer{}
+	translator := NewTranslator(log.NewLogfmtLogger(output), "custom.google.com", testResourceMappings)
+	for i := 0; i < b.N; i++ {
+		translator.ToCreateTimeSeriesRequest(metrics)
+	}
+}
