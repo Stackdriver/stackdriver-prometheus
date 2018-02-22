@@ -189,18 +189,9 @@ func setValueBaseOnSimpleType(
 	value float64, valueType metric_pb.MetricDescriptor_ValueType,
 	point *monitoring_pb.Point) {
 
-	if valueType == metric_pb.MetricDescriptor_INT64 {
-		point.Value = &monitoring_pb.TypedValue{
-			Value: &monitoring_pb.TypedValue_Int64Value{Int64Value: int64(value)},
-		}
-	} else if valueType == metric_pb.MetricDescriptor_DOUBLE {
+	if valueType == metric_pb.MetricDescriptor_DOUBLE {
 		point.Value = &monitoring_pb.TypedValue{
 			Value: &monitoring_pb.TypedValue_DoubleValue{DoubleValue: value},
-		}
-	} else if valueType == metric_pb.MetricDescriptor_BOOL {
-		var val = math.Abs(value) > falseValueEpsilon
-		point.Value = &monitoring_pb.TypedValue{
-			Value: &monitoring_pb.TypedValue_BoolValue{BoolValue: val},
 		}
 	} else {
 		glog.Errorf("Value type '%s' is not supported yet.", valueType)
