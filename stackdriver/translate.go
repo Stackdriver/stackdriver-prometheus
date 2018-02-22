@@ -93,10 +93,10 @@ func (t *Translator) ToCreateTimeSeriesRequest(
 }
 
 func (t *Translator) translateFamily(family *retrieval.MetricFamily) ([]*monitoring_pb.TimeSeries, error) {
-	var tss []*monitoring_pb.TimeSeries
 	if _, found := supportedMetricTypes[family.GetType()]; !found {
-		return tss, &unsupportedTypeError{family.GetType()}
+		return nil, &unsupportedTypeError{family.GetType()}
 	}
+	tss := make([]*monitoring_pb.TimeSeries, 0, len(family.GetMetric()))
 	for i, metric := range family.GetMetric() {
 		startTime := timestamp.Time(family.MetricResetTimestampMs[i])
 		ts, err := t.translateOne(family.GetName(), family.GetType(), metric, startTime)
