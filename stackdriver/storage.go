@@ -21,6 +21,8 @@ import (
 
 	"github.com/go-kit/kit/log"
 	"github.com/jkohen/prometheus/retrieval"
+	config_util "github.com/prometheus/common/config"
+	"github.com/prometheus/common/model"
 	"github.com/prometheus/prometheus/config"
 )
 
@@ -69,7 +71,6 @@ func (s *Storage) Close() error {
 
 // ApplyConfig updates the state as the new config requires.
 func (s *Storage) ApplyConfig(conf *config.Config) error {
-	// TODO(jkohen): try extracting this from the credentials
 	var projectId string
 	if value, ok := conf.GlobalConfig.ExternalLabels[ProjectIdLabel]; !ok {
 		return fmt.Errorf(
@@ -88,21 +89,18 @@ func (s *Storage) ApplyConfig(conf *config.Config) error {
 	// TODO: we should only stop & recreate queues which have changes,
 	// as this can be quite disruptive.
 	for i, rwConf := range conf.RemoteWriteConfigs {
-		c, err := NewClient(i, &ClientConfig{
-			Logger:    s.logger,
-			ProjectId: projectId,
-			URL:       rwConf.URL,
-			Timeout:   rwConf.RemoteTimeout,
-		})
-		if err != nil {
-			return err
-		}
 		newQueues = append(newQueues, NewQueueManager(
 			s.logger,
 			rwConf.QueueConfig,
 			conf.GlobalConfig.ExternalLabels,
 			rwConf.WriteRelabelConfigs,
-			c,
+			&clientFactory{
+				logger:    s.logger,
+				projectId: projectId,
+				url:       rwConf.URL,
+				timeout:   rwConf.RemoteTimeout,
+				index:     i,
+			},
 			s.cfg,
 		))
 	}
@@ -117,4 +115,25 @@ func (s *Storage) ApplyConfig(conf *config.Config) error {
 	}
 
 	return nil
+}
+
+type clientFactory struct {
+	logger    log.Logger
+	projectId string
+	url       *config_util.URL
+	timeout   model.Duration
+	index     int
+}
+
+func (f *clientFactory) New() StorageClient {
+	return NewClient(f.index, &ClientConfig{
+		Logger:    f.logger,
+		ProjectId: f.projectId,
+		URL:       f.url,
+		Timeout:   f.timeout,
+	})
+}
+
+func (f *clientFactory) Name() string {
+	return fmt.Sprintf("%d:%s", f.index, f.url)
 }

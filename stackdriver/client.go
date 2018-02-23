@@ -43,14 +43,17 @@ const (
 	MonitoringWriteScope      = "https://www.googleapis.com/auth/monitoring.write"
 )
 
-// Client allows reading and writing from/to a remote HTTP endpoint.
+// Client allows reading and writing from/to a remote gRPC endpoint. The
+// implementation may hit a single backend, so the application should create a
+// number of these clients.
 type Client struct {
 	index     int // Used to differentiate clients in metrics.
 	logger    log.Logger
 	projectId string
 	url       *config_util.URL
 	timeout   time.Duration
-	conn      *grpc.ClientConn
+
+	conn *grpc.ClientConn
 }
 
 // ClientConfig configures a Client.
@@ -62,24 +65,44 @@ type ClientConfig struct {
 }
 
 // NewClient creates a new Client.
-func NewClient(index int, conf *ClientConfig) (*Client, error) {
+func NewClient(index int, conf *ClientConfig) *Client {
 	logger := conf.Logger
 	if logger == nil {
 		logger = log.NewNopLogger()
 	}
-	useAuth, err := strconv.ParseBool(conf.URL.Query().Get("auth"))
+	return &Client{
+		index:     index,
+		logger:    logger,
+		projectId: conf.ProjectId,
+		url:       conf.URL,
+		timeout:   time.Duration(conf.Timeout),
+	}
+}
+
+type recoverableError struct {
+	error
+}
+
+func (c *Client) getConnection(ctx context.Context) (*grpc.ClientConn, error) {
+	if c.conn != nil {
+		return c.conn, nil
+	}
+
+	useAuth, err := strconv.ParseBool(c.url.Query().Get("auth"))
 	if err != nil {
 		useAuth = true // Default to auth enabled.
 	}
-	level.Info(logger).Log(
+	level.Debug(c.logger).Log(
 		"msg", "is auth enabled",
 		"auth", useAuth,
-		"url", conf.URL.String())
-	// TODO(jkohen): Google APIs return a single IP for the whole
-	// service. In order to get proper load-balancing of the transport, we
-	// want more clients. We should probably create one client per shard
-	// within QueueManager, or an unbounded pool of connections here.
-	dopts := []grpc.DialOption{grpc.WithBalancerName(roundrobin.Name)}
+		"url", c.url.String())
+	// Google APIs currently return a single IP for the whole service.  gRPC
+	// client-side load-balancing won't spread the load across backends
+	// while that's true, but it also doesn't hurt.
+	dopts := []grpc.DialOption{
+		grpc.WithBalancerName(roundrobin.Name),
+		grpc.WithBlock(), // Wait for the connection to be established before using it.
+	}
 	if useAuth {
 		rpcCreds, err := oauth.NewApplicationDefault(context.Background(), MonitoringWriteScope)
 		if err != nil {
@@ -92,26 +115,13 @@ func NewClient(index int, conf *ClientConfig) (*Client, error) {
 	} else {
 		dopts = append(dopts, grpc.WithInsecure())
 	}
-	address := conf.URL.Hostname()
-	if len(conf.URL.Port()) > 0 {
-		address = fmt.Sprintf("%s:%s", address, conf.URL.Port())
+	address := c.url.Hostname()
+	if len(c.url.Port()) > 0 {
+		address = fmt.Sprintf("%s:%s", address, c.url.Port())
 	}
-	conn, err := grpc.Dial(address, dopts...)
-	if err != nil {
-		return nil, err
-	}
-	return &Client{
-		index:     index,
-		logger:    logger,
-		projectId: conf.ProjectId,
-		url:       conf.URL,
-		timeout:   time.Duration(conf.Timeout),
-		conn:      conn,
-	}, nil
-}
-
-type recoverableError struct {
-	error
+	conn, err := grpc.DialContext(ctx, address, dopts...)
+	c.conn = conn
+	return conn, err
 }
 
 // Store sends a batch of samples to the HTTP endpoint.
@@ -125,8 +135,13 @@ func (c *Client) Store(req *monitoring.CreateTimeSeriesRequest) error {
 	ctx, cancel := context.WithTimeout(context.Background(), c.timeout)
 	defer cancel()
 
+	conn, err := c.getConnection(ctx)
+	if err != nil {
+		return err
+	}
+
 	level.Debug(c.logger).Log("msg", "sending request to Stackdriver")
-	service := monitoring.NewMetricServiceClient(c.conn)
+	service := monitoring.NewMetricServiceClient(conn)
 
 	errors := make(chan error, len(tss)/maxTimeseriesesPerRequest+1)
 	var wg sync.WaitGroup
@@ -175,7 +190,9 @@ func (c Client) Name() string {
 	return fmt.Sprintf("%d:%s", c.index, c.url)
 }
 
-// TODO(jkohen): call this thing
 func (c Client) Close() error {
+	if c.conn == nil {
+		return nil
+	}
 	return c.conn.Close()
 }

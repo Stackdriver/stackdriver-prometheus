@@ -138,6 +138,11 @@ type StorageClient interface {
 	Close() error
 }
 
+type StorageClientFactory interface {
+	New() StorageClient
+	Name() string
+}
+
 // QueueManager manages a queue of samples to be sent to the Storage
 // indicated by the provided StorageClient.
 type QueueManager struct {
@@ -146,7 +151,7 @@ type QueueManager struct {
 	cfg              config.QueueConfig
 	externalLabels   model.LabelSet
 	relabelConfigs   []*config.RelabelConfig
-	client           StorageClient
+	clientFactory    StorageClientFactory
 	queueName        string
 	logLimiter       *rate.Limiter
 	resourceMappings []ResourceMap
@@ -162,7 +167,7 @@ type QueueManager struct {
 }
 
 // NewQueueManager builds a new QueueManager.
-func NewQueueManager(logger log.Logger, cfg config.QueueConfig, externalLabels model.LabelSet, relabelConfigs []*config.RelabelConfig, client StorageClient, sdCfg *StackdriverConfig) *QueueManager {
+func NewQueueManager(logger log.Logger, cfg config.QueueConfig, externalLabels model.LabelSet, relabelConfigs []*config.RelabelConfig, clientFactory StorageClientFactory, sdCfg *StackdriverConfig) *QueueManager {
 	if logger == nil {
 		logger = log.NewNopLogger()
 	}
@@ -170,13 +175,14 @@ func NewQueueManager(logger log.Logger, cfg config.QueueConfig, externalLabels m
 	if sdCfg.K8sResourceTypes {
 		resourceMappings = K8sResourceMappings
 	}
+
 	t := &QueueManager{
 		logger:           logger,
 		cfg:              cfg,
 		externalLabels:   externalLabels,
 		relabelConfigs:   relabelConfigs,
-		client:           client,
-		queueName:        client.Name(),
+		clientFactory:    clientFactory,
+		queueName:        clientFactory.Name(),
 		resourceMappings: resourceMappings,
 
 		logLimiter:  rate.NewLimiter(logRateLimit, logBurst),
@@ -250,8 +256,6 @@ func (t *QueueManager) Stop() {
 	t.shardsMtx.Lock()
 	defer t.shardsMtx.Unlock()
 	t.shards.stop()
-
-	t.client.Close()
 
 	level.Info(t.logger).Log("msg", "Remote storage stopped.")
 }
@@ -353,6 +357,7 @@ func (t *QueueManager) reshard(n int) {
 
 type shards struct {
 	qm         *QueueManager
+	client     StorageClient
 	translator *Translator
 	queues     []chan *retrieval.MetricFamily
 	done       chan struct{}
@@ -402,12 +407,14 @@ func (s *shards) enqueue(sample *retrieval.MetricFamily) {
 
 func (s *shards) runShard(i int) {
 	defer s.wg.Done()
+	client := s.qm.clientFactory.New()
+	defer client.Close()
 	queue := s.queues[i]
 
 	// Send batches of at most MaxSamplesPerSend samples to the remote storage.
 	// If we have fewer samples than that, flush them out after a deadline
 	// anyways.
-	pendingSamples := []*retrieval.MetricFamily{}
+	pendingSamples := make([]*retrieval.MetricFamily, 0, s.qm.cfg.MaxSamplesPerSend)
 
 	for {
 		select {
@@ -415,7 +422,7 @@ func (s *shards) runShard(i int) {
 			if !ok {
 				if len(pendingSamples) > 0 {
 					level.Debug(s.qm.logger).Log("msg", "Flushing samples to remote storage...", "count", len(pendingSamples))
-					s.sendSamples(pendingSamples)
+					s.sendSamples(client, pendingSamples)
 					level.Debug(s.qm.logger).Log("msg", "Done flushing.")
 				}
 				return
@@ -425,12 +432,12 @@ func (s *shards) runShard(i int) {
 			pendingSamples = append(pendingSamples, sample)
 
 			for len(pendingSamples) >= s.qm.cfg.MaxSamplesPerSend {
-				s.sendSamples(pendingSamples[:s.qm.cfg.MaxSamplesPerSend])
+				s.sendSamples(client, pendingSamples[:s.qm.cfg.MaxSamplesPerSend])
 				pendingSamples = pendingSamples[s.qm.cfg.MaxSamplesPerSend:]
 			}
 		case <-time.After(s.qm.cfg.BatchSendDeadline):
 			if len(pendingSamples) > 0 {
-				s.sendSamples(pendingSamples)
+				s.sendSamples(client, pendingSamples)
 				pendingSamples = pendingSamples[:0]
 			}
 		}
@@ -438,12 +445,12 @@ func (s *shards) runShard(i int) {
 }
 
 // sendSamples to the remote storage with backoff for recoverable errors.
-func (s *shards) sendSamples(samples []*retrieval.MetricFamily) {
+func (s *shards) sendSamples(client StorageClient, samples []*retrieval.MetricFamily) {
+	req := s.translator.ToCreateTimeSeriesRequest(samples)
 	backoff := s.qm.cfg.MinBackoff
 	for retries := s.qm.cfg.MaxRetries; retries > 0; retries-- {
 		begin := time.Now()
-		req := s.translator.ToCreateTimeSeriesRequest(samples)
-		err := s.qm.client.Store(req)
+		err := client.Store(req)
 
 		sentBatchDuration.WithLabelValues(s.qm.queueName).Observe(time.Since(begin).Seconds())
 		if err == nil {

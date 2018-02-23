@@ -73,13 +73,10 @@ func TestStoreErrorHandling(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			c, err := NewClient(0, &ClientConfig{
+			c := NewClient(0, &ClientConfig{
 				URL:     &config_util.URL{URL: serverURL},
 				Timeout: model.Duration(time.Second),
 			})
-			if err != nil {
-				t.Fatal(err)
-			}
 
 			err = c.Store(&monitoring.CreateTimeSeriesRequest{
 				TimeSeries: []*monitoring.TimeSeries{
@@ -112,14 +109,10 @@ func TestEmptyRequest(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	c, err := NewClient(0, &ClientConfig{
+	c := NewClient(0, &ClientConfig{
 		URL:     &config_util.URL{URL: serverURL},
 		Timeout: model.Duration(time.Second),
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
-
 	if err := c.Store(&monitoring.CreateTimeSeriesRequest{}); err != nil {
 		t.Fatal(err)
 	}

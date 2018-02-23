@@ -109,6 +109,10 @@ func (c *TestStorageClient) Store(req *monitoring.CreateTimeSeriesRequest) error
 	return nil
 }
 
+func (t *TestStorageClient) New() StorageClient {
+	return t
+}
+
 func (c *TestStorageClient) Name() string {
 	return "teststorageclient"
 }
@@ -296,6 +300,10 @@ func (c *TestBlockingStorageClient) NumCalls() uint64 {
 
 func (c *TestBlockingStorageClient) unlock() {
 	close(c.block)
+}
+
+func (t *TestBlockingStorageClient) New() StorageClient {
+	return t
 }
 
 func (c *TestBlockingStorageClient) Name() string {
