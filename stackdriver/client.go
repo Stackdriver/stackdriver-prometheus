@@ -17,6 +17,7 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
+	"strconv"
 	"sync"
 	"time"
 
@@ -58,7 +59,6 @@ type ClientConfig struct {
 	ProjectId string // The Stackdriver project id in "projects/name-or-number" format.
 	URL       *config_util.URL
 	Timeout   model.Duration
-	Auth      bool
 }
 
 // NewClient creates a new Client.
@@ -67,12 +67,20 @@ func NewClient(index int, conf *ClientConfig) (*Client, error) {
 	if logger == nil {
 		logger = log.NewNopLogger()
 	}
+	useAuth, err := strconv.ParseBool(conf.URL.Query().Get("auth"))
+	if err != nil {
+		useAuth = true // Default to auth enabled.
+	}
+	level.Info(logger).Log(
+		"msg", "is auth enabled",
+		"auth", useAuth,
+		"url", conf.URL.String())
 	// TODO(jkohen): Google APIs return a single IP for the whole
 	// service. In order to get proper load-balancing of the transport, we
 	// want more clients. We should probably create one client per shard
 	// within QueueManager, or an unbounded pool of connections here.
 	dopts := []grpc.DialOption{grpc.WithBalancerName(roundrobin.Name)}
-	if conf.Auth {
+	if useAuth {
 		rpcCreds, err := oauth.NewApplicationDefault(context.Background(), MonitoringWriteScope)
 		if err != nil {
 			return nil, err

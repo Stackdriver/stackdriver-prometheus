@@ -17,11 +17,9 @@ package stackdriver
 
 import (
 	"fmt"
-	"strconv"
 	"sync"
 
 	"github.com/go-kit/kit/log"
-	"github.com/go-kit/kit/log/level"
 	"github.com/jkohen/prometheus/retrieval"
 	"github.com/prometheus/prometheus/config"
 )
@@ -90,20 +88,11 @@ func (s *Storage) ApplyConfig(conf *config.Config) error {
 	// TODO: we should only stop & recreate queues which have changes,
 	// as this can be quite disruptive.
 	for i, rwConf := range conf.RemoteWriteConfigs {
-		useAuth, err := strconv.ParseBool(rwConf.URL.Query().Get("auth"))
-		if err != nil {
-			useAuth = true // Default to auth enabled.
-		}
-		level.Info(s.logger).Log(
-			"msg", "is auth enabled",
-			"auth", useAuth,
-			"url", rwConf.URL.String())
 		c, err := NewClient(i, &ClientConfig{
 			Logger:    s.logger,
 			ProjectId: projectId,
 			URL:       rwConf.URL,
 			Timeout:   rwConf.RemoteTimeout,
-			Auth:      useAuth,
 		})
 		if err != nil {
 			return err

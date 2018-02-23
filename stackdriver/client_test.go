@@ -68,7 +68,7 @@ func TestStoreErrorHandling(t *testing.T) {
 			go grpcServer.Serve(listener)
 			defer grpcServer.Stop()
 
-			serverURL, err := url.Parse("https://" + listener.Addr().String())
+			serverURL, err := url.Parse("https://" + listener.Addr().String() + "?auth=false")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -76,7 +76,6 @@ func TestStoreErrorHandling(t *testing.T) {
 			c, err := NewClient(0, &ClientConfig{
 				URL:     &config_util.URL{URL: serverURL},
 				Timeout: model.Duration(time.Second),
-				Auth:    false,
 			})
 			if err != nil {
 				t.Fatal(err)
