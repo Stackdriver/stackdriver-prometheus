@@ -910,7 +910,11 @@ func TestPointExtractor(t *testing.T) {
 				"metric_h{le=\"100\"} 1\n"+
 				"metric_h{le=\"+Inf\"} 10\n"+
 				"metric_h_count 10\n"+
-				"metric_h_sum 123.1\n"), now); err != nil {
+				"metric_h_sum 123.1\n"+
+				"# TYPE metric_s summary\n"+
+				"metric_s{quantile=\"1\"} 1\n"+
+				"metric_s_count 1\n"+
+				"metric_s_sum 13.4\n"), now); err != nil {
 			t.Fatalf("Unexpected append error: %s", err)
 		}
 		want := []*MetricFamily{}
@@ -935,7 +939,11 @@ func TestPointExtractor(t *testing.T) {
 				"metric_h{le=\"100\"} 11\n"+
 				"metric_h{le=\"+Inf\"} 30\n"+
 				"metric_h_count 30\n"+
-				"metric_h_sum 223.1\n"), now); err != nil {
+				"metric_h_sum 223.1\n"+
+				"# TYPE metric_s summary\n"+
+				"metric_s{quantile=\"1\"} 1\n"+
+				"metric_s_count 7\n"+
+				"metric_s_sum 213.4\n"), now); err != nil {
 			t.Fatalf("Unexpected append error: %s", err)
 		}
 		resetTime := now.Add(-1 * time.Millisecond)
@@ -943,6 +951,7 @@ func TestPointExtractor(t *testing.T) {
 			counterFromComponents("metric_a", timestamp.FromTime(now), timestamp.FromTime(existingReset), 10),
 			counterFromComponents("metric_b", timestamp.FromTime(now), timestamp.FromTime(resetTime), 11),
 			histogramFromComponents("metric_h", timestamp.FromTime(now), timestamp.FromTime(existingReset), 10, 20, 100),
+			summaryFromComponents("metric_s", timestamp.FromTime(now), timestamp.FromTime(existingReset), 6, 200.0),
 		}
 		sort.Sort(ByName(want))
 		if !reflect.DeepEqual(want, app.Sorted()) {
@@ -963,7 +972,11 @@ func TestPointExtractor(t *testing.T) {
 				"metric_h{le=\"100\"} 1\n"+
 				"metric_h{le=\"+Inf\"} 10\n"+
 				"metric_h_count 10\n"+
-				"metric_h_sum 23.1\n"), now); err != nil {
+				"metric_h_sum 23.1\n"+
+				"# TYPE metric_s summary\n"+
+				"metric_s{quantile=\"1\"} 1\n"+
+				"metric_s_count 3\n"+
+				"metric_s_sum 13.4\n"), now); err != nil {
 			t.Fatalf("Unexpected append error: %s", err)
 		}
 		resetTime := now.Add(-1 * time.Millisecond)
@@ -971,6 +984,7 @@ func TestPointExtractor(t *testing.T) {
 			counterFromComponents("metric_a", timestamp.FromTime(now), timestamp.FromTime(resetTime), 10),
 			counterFromComponents("metric_b", timestamp.FromTime(now), timestamp.FromTime(resetTime), 1),
 			histogramFromComponents("metric_h", timestamp.FromTime(now), timestamp.FromTime(resetTime), 1, 10, 23.1),
+			summaryFromComponents("metric_s", timestamp.FromTime(now), timestamp.FromTime(resetTime), 3, 13.4),
 		}
 		sort.Sort(ByName(want))
 		if !reflect.DeepEqual(want, app.Sorted()) {
@@ -1197,6 +1211,33 @@ func histogramFromComponents(name string, t int64, reset int64, c1, c2 uint64, s
 							{
 								CumulativeCount: proto.Uint64(c2),
 								UpperBound:      proto.Float64(math.Inf(1)),
+							},
+						},
+					},
+					TimestampMs: proto.Int64(t),
+				},
+			},
+		},
+		MetricResetTimestampMs: []int64{
+			reset,
+		},
+	}
+}
+
+func summaryFromComponents(name string, t int64, reset int64, count uint64, sum float64) *MetricFamily {
+	return &MetricFamily{
+		MetricFamily: &dto.MetricFamily{
+			Name: proto.String(name),
+			Type: dto.MetricType_SUMMARY.Enum(),
+			Metric: []*dto.Metric{
+				{
+					Summary: &dto.Summary{
+						SampleCount: proto.Uint64(count),
+						SampleSum:   proto.Float64(sum),
+						Quantile: []*dto.Quantile{
+							{
+								Quantile: proto.Float64(1),
+								Value:    proto.Float64(1),
 							},
 						},
 					},

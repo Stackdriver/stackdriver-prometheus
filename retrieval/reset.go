@@ -34,10 +34,16 @@ type PointHistogram struct {
 	Bucket []PointHistogramBucket
 }
 
+type PointSummary struct {
+	Count uint64
+	Sum   float64
+}
+
 type PointValue struct {
 	// Only one of the following fields may be set.
 	Counter   float64
 	Histogram PointHistogram
+	Summary   PointSummary
 }
 
 type Point struct {
@@ -53,7 +59,7 @@ type resetPointMapper interface {
 }
 
 func ResetPointCompatible(mType dto.MetricType) bool {
-	return mType == dto.MetricType_COUNTER || mType == dto.MetricType_HISTOGRAM
+	return mType == dto.MetricType_COUNTER || mType == dto.MetricType_HISTOGRAM || mType == dto.MetricType_SUMMARY
 }
 
 func NewResetPointKey(metricName string, metricLabels labels.Labels, metricType dto.MetricType) (key ResetPointKey) {

@@ -329,9 +329,10 @@ func TestToCreateTimeSeriesRequest(t *testing.T) {
 	assert.Equal(t, "gke_container", metric.Resource.Type)
 	assert.Equal(t, "metrics.prefix/test_summary_count", metric.Metric.Type)
 	assert.Equal(t, metric_pb.MetricDescriptor_INT64, metric.ValueType)
-	assert.Equal(t, metric_pb.MetricDescriptor_GAUGE, metric.MetricKind)
+	assert.Equal(t, metric_pb.MetricDescriptor_CUMULATIVE, metric.MetricKind)
 	assert.Equal(t, 0, len(metric.Metric.Labels))
 	assert.InEpsilon(t, 47, metric.Points[0].Value.GetInt64Value(), epsilon)
+	assert.Equal(t, &timestamp.Timestamp{Seconds: 1234567890, Nanos: 432000000}, metric.Points[0].Interval.StartTime)
 	assert.Equal(t, &timestamp.Timestamp{Seconds: 1234568000, Nanos: 432000000}, metric.Points[0].Interval.EndTime)
 
 	// Summary metrics are exported as individual gauges for each quantile.

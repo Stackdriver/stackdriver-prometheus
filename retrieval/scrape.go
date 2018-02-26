@@ -890,6 +890,13 @@ func valueFromMetric(metric *dto.Metric) *PointValue {
 			value.Histogram.Bucket[i].CumulativeCount = bucket.GetCumulativeCount()
 		}
 		return value
+	} else if metric.Summary != nil {
+		return &PointValue{
+			Summary: PointSummary{
+				Count: metric.Summary.GetSampleCount(),
+				Sum:   metric.Summary.GetSampleSum(),
+			},
+		}
 	}
 	return nil
 }
@@ -900,6 +907,9 @@ func valueReset(metric *dto.Metric, ref PointValue) bool {
 	} else if metric.Histogram != nil {
 		return metric.Histogram.GetSampleSum() < ref.Histogram.Sum ||
 			metric.Histogram.GetSampleCount() < ref.Histogram.Count
+	} else if metric.Summary != nil {
+		return metric.Summary.GetSampleSum() < ref.Summary.Sum ||
+			metric.Summary.GetSampleCount() < ref.Summary.Count
 	}
 	return false
 }
@@ -925,5 +935,9 @@ func subtractResetValue(resetValue PointValue, metric *dto.Metric) {
 		for i, _ := range h.Bucket {
 			*h.Bucket[i].CumulativeCount -= r.Bucket[i].CumulativeCount
 		}
+	}
+	if resetValue.Summary.Count > 0 {
+		*metric.Summary.SampleCount -= resetValue.Summary.Count
+		*metric.Summary.SampleSum -= resetValue.Summary.Sum
 	}
 }

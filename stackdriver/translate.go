@@ -102,8 +102,9 @@ func (t *Translator) translateFamily(family *retrieval.MetricFamily) ([]*monitor
 	// series. Notoriously, summary maps to 2 or more.
 	tss := make([]*monitoring_pb.TimeSeries, 0, len(family.GetMetric()))
 	for i, metric := range family.GetMetric() {
+		startTime := timestamp.Time(family.MetricResetTimestampMs[i])
 		if family.GetType() == dto.MetricType_SUMMARY {
-			ts, err := t.translateSummary(family.GetName(), metric)
+			ts, err := t.translateSummary(family.GetName(), metric, startTime)
 			if err != nil {
 				// Metrics are usually independent, so just drop this one.
 				level.Warn(t.logger).Log(
@@ -115,7 +116,6 @@ func (t *Translator) translateFamily(family *retrieval.MetricFamily) ([]*monitor
 			}
 			tss = append(tss, ts...)
 		} else {
-			startTime := timestamp.Time(family.MetricResetTimestampMs[i])
 			ts, err := t.translateOne(family.GetName(), family.GetType(), metric, startTime)
 			if err != nil {
 				// Metrics are usually independent, so just drop this one.
@@ -187,7 +187,8 @@ func (t *Translator) translateOne(name string,
 
 // assumes that mType is Counter, Gauge or Histogram. Returns nil on error.
 func (t *Translator) translateSummary(name string,
-	metric *dto.Metric) ([]*monitoring_pb.TimeSeries, error) {
+	metric *dto.Metric,
+	start time.Time) ([]*monitoring_pb.TimeSeries, error) {
 	monitoredResource := t.getMonitoredResource(metric)
 	if monitoredResource == nil {
 		return nil, errors.New("cannot extract Stackdriver monitored resource from metric")
@@ -195,7 +196,6 @@ func (t *Translator) translateSummary(name string,
 	interval := &monitoring_pb.TimeInterval{
 		EndTime: getTimestamp(timestamp.Time(metric.GetTimestampMs()).UTC()),
 	}
-	const metricKind = metric_pb.MetricDescriptor_GAUGE
 	tsLabels := getMetricLabels(metric.GetLabel())
 	if len(tsLabels) > maxLabelCount {
 		return nil, fmt.Errorf(
@@ -213,7 +213,7 @@ func (t *Translator) translateSummary(name string,
 			Type:   baseMetricType + "_sum",
 		},
 		Resource:   monitoredResource,
-		MetricKind: metricKind,
+		MetricKind: metric_pb.MetricDescriptor_GAUGE,
 		ValueType:  metric_pb.MetricDescriptor_DOUBLE,
 		Points: []*monitoring_pb.Point{
 			{
@@ -231,11 +231,14 @@ func (t *Translator) translateSummary(name string,
 			Type:   baseMetricType + "_count",
 		},
 		Resource:   monitoredResource,
-		MetricKind: metricKind,
+		MetricKind: metric_pb.MetricDescriptor_CUMULATIVE,
 		ValueType:  metric_pb.MetricDescriptor_INT64,
 		Points: []*monitoring_pb.Point{
 			{
-				Interval: interval,
+				Interval: &monitoring_pb.TimeInterval{
+					StartTime: getTimestamp(start.UTC()),
+					EndTime:   getTimestamp(timestamp.Time(metric.GetTimestampMs()).UTC()),
+				},
 				Value: &monitoring_pb.TypedValue{
 					&monitoring_pb.TypedValue_Int64Value{Int64Value: int64(summary.GetSampleCount())},
 				},
@@ -256,7 +259,7 @@ func (t *Translator) translateSummary(name string,
 				Type:   baseMetricType,
 			},
 			Resource:   monitoredResource,
-			MetricKind: metricKind,
+			MetricKind: metric_pb.MetricDescriptor_GAUGE,
 			ValueType:  metric_pb.MetricDescriptor_DOUBLE,
 			Points: []*monitoring_pb.Point{
 				{

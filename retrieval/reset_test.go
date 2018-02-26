@@ -48,6 +48,11 @@ func TestResetPointKey(t *testing.T) {
 	if k1 == k4 {
 		t.Fatalf("expected %v to be different from %v", k1, k4)
 	}
+
+	k5 := NewResetPointKey("foo", lbls, dto.MetricType_SUMMARY)
+	if k1 == k5 {
+		t.Fatalf("expected %v to be different from %v", k1, k5)
+	}
 }
 
 func TestTargetResetPoint(t *testing.T) {
