@@ -16,6 +16,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"strconv"
 	"strings"
 	"time"
 
@@ -36,6 +37,7 @@ var supportedMetricTypes = map[dto.MetricType]bool{
 	dto.MetricType_COUNTER:   true,
 	dto.MetricType_GAUGE:     true,
 	dto.MetricType_HISTOGRAM: true,
+	dto.MetricType_SUMMARY:   true,
 }
 
 const (
@@ -96,20 +98,36 @@ func (t *Translator) translateFamily(family *retrieval.MetricFamily) ([]*monitor
 	if _, found := supportedMetricTypes[family.GetType()]; !found {
 		return nil, &unsupportedTypeError{family.GetType()}
 	}
+	// This isn't exact, because not all metric types map to a single time
+	// series. Notoriously, summary maps to 2 or more.
 	tss := make([]*monitoring_pb.TimeSeries, 0, len(family.GetMetric()))
 	for i, metric := range family.GetMetric() {
-		startTime := timestamp.Time(family.MetricResetTimestampMs[i])
-		ts, err := t.translateOne(family.GetName(), family.GetType(), metric, startTime)
-		if err != nil {
-			// Metrics are usually independent, so just drop this one.
-			level.Warn(t.logger).Log(
-				"msg", "error while processing metric",
-				"family", family.GetName(),
-				"metric", metric,
-				"err", err)
-			continue
+		if family.GetType() == dto.MetricType_SUMMARY {
+			ts, err := t.translateSummary(family.GetName(), metric)
+			if err != nil {
+				// Metrics are usually independent, so just drop this one.
+				level.Warn(t.logger).Log(
+					"msg", "error while processing metric",
+					"family", family.GetName(),
+					"metric", metric,
+					"err", err)
+				continue
+			}
+			tss = append(tss, ts...)
+		} else {
+			startTime := timestamp.Time(family.MetricResetTimestampMs[i])
+			ts, err := t.translateOne(family.GetName(), family.GetType(), metric, startTime)
+			if err != nil {
+				// Metrics are usually independent, so just drop this one.
+				level.Warn(t.logger).Log(
+					"msg", "error while processing metric",
+					"family", family.GetName(),
+					"metric", metric,
+					"err", err)
+				continue
+			}
+			tss = append(tss, ts)
 		}
-		tss = append(tss, ts)
 	}
 	return tss, nil
 }
@@ -167,21 +185,109 @@ func (t *Translator) translateOne(name string,
 	}, nil
 }
 
+// assumes that mType is Counter, Gauge or Histogram. Returns nil on error.
+func (t *Translator) translateSummary(name string,
+	metric *dto.Metric) ([]*monitoring_pb.TimeSeries, error) {
+	monitoredResource := t.getMonitoredResource(metric)
+	if monitoredResource == nil {
+		return nil, errors.New("cannot extract Stackdriver monitored resource from metric")
+	}
+	interval := &monitoring_pb.TimeInterval{
+		EndTime: getTimestamp(timestamp.Time(metric.GetTimestampMs()).UTC()),
+	}
+	const metricKind = metric_pb.MetricDescriptor_GAUGE
+	tsLabels := getMetricLabels(metric.GetLabel())
+	if len(tsLabels) > maxLabelCount {
+		return nil, fmt.Errorf(
+			"dropping metric because it has more than %v labels, and Stackdriver would reject it",
+			maxLabelCount)
+	}
+
+	baseMetricType := getMetricType(t.metricsPrefix, name)
+	summary := metric.GetSummary()
+	tss := make([]*monitoring_pb.TimeSeries, 2+len(summary.GetQuantile()))
+	// Sum metric. Summary works over a sliding window, so this value could go down, hence GAUGE.
+	tss[0] = &monitoring_pb.TimeSeries{
+		Metric: &metric_pb.Metric{
+			Labels: tsLabels,
+			Type:   baseMetricType + "_sum",
+		},
+		Resource:   monitoredResource,
+		MetricKind: metricKind,
+		ValueType:  metric_pb.MetricDescriptor_DOUBLE,
+		Points: []*monitoring_pb.Point{
+			{
+				Interval: interval,
+				Value: &monitoring_pb.TypedValue{
+					&monitoring_pb.TypedValue_DoubleValue{DoubleValue: summary.GetSampleSum()},
+				},
+			},
+		},
+	}
+	// Count metric. Summary works over a sliding window, so this value could go down, hence GAUGE.
+	tss[1] = &monitoring_pb.TimeSeries{
+		Metric: &metric_pb.Metric{
+			Labels: tsLabels,
+			Type:   baseMetricType + "_count",
+		},
+		Resource:   monitoredResource,
+		MetricKind: metricKind,
+		ValueType:  metric_pb.MetricDescriptor_INT64,
+		Points: []*monitoring_pb.Point{
+			{
+				Interval: interval,
+				Value: &monitoring_pb.TypedValue{
+					&monitoring_pb.TypedValue_Int64Value{Int64Value: int64(summary.GetSampleCount())},
+				},
+			},
+		},
+	}
+
+	for i, quantile := range summary.GetQuantile() {
+		qLabels := make(map[string]string, len(tsLabels))
+		for k, v := range tsLabels {
+			qLabels[k] = v
+		}
+		// Format using ddd.dddd format (no exponent) with the minimum number of digits necessary.
+		qLabels["quantile"] = strconv.FormatFloat(quantile.GetQuantile(), 'f', -1, 64)
+		tss[i+2] = &monitoring_pb.TimeSeries{
+			Metric: &metric_pb.Metric{
+				Labels: qLabels,
+				Type:   baseMetricType,
+			},
+			Resource:   monitoredResource,
+			MetricKind: metricKind,
+			ValueType:  metric_pb.MetricDescriptor_DOUBLE,
+			Points: []*monitoring_pb.Point{
+				{
+					Interval: interval,
+					Value: &monitoring_pb.TypedValue{
+						&monitoring_pb.TypedValue_DoubleValue{DoubleValue: quantile.GetValue()},
+					},
+				},
+			},
+		}
+	}
+
+	return tss, nil
+}
+
 func setValue(
 	mType dto.MetricType, valueType metric_pb.MetricDescriptor_ValueType,
 	metric *dto.Metric, point *monitoring_pb.Point) {
 
 	point.Value = &monitoring_pb.TypedValue{}
-	if mType == dto.MetricType_GAUGE {
+	switch mType {
+	case dto.MetricType_GAUGE:
 		setValueBaseOnSimpleType(metric.GetGauge().GetValue(), valueType, point)
-	} else if mType == dto.MetricType_HISTOGRAM {
+	case dto.MetricType_COUNTER:
+		setValueBaseOnSimpleType(metric.GetCounter().GetValue(), valueType, point)
+	case dto.MetricType_HISTOGRAM:
 		point.Value = &monitoring_pb.TypedValue{
 			Value: &monitoring_pb.TypedValue_DistributionValue{
 				DistributionValue: convertToDistributionValue(metric.GetHistogram()),
 			},
 		}
-	} else {
-		setValueBaseOnSimpleType(metric.GetCounter().GetValue(), valueType, point)
 	}
 }
 

@@ -35,13 +35,16 @@ import (
 var metricTypeGauge = dto.MetricType_GAUGE
 var metricTypeCounter = dto.MetricType_COUNTER
 var metricTypeHistogram = dto.MetricType_HISTOGRAM
+var metricTypeSummary = dto.MetricType_SUMMARY
 
 var testMetricName = "test_name"
 var gaugeMetricName = "gauge_metric"
 var floatMetricName = "float_metric"
 var testMetricHistogram = "test_histogram"
+var testMetricSummary = "test_summary"
 var testMetricDescription = "Description 1"
 var testMetricHistogramDescription = "Description 2"
+var testMetricSummaryDescription = "Description 3"
 
 var testResourceMappings = []ResourceMap{
 	{
@@ -178,6 +181,39 @@ var metrics = []*retrieval.MetricFamily{
 			1234567890432,
 		},
 	},
+	{
+		MetricFamily: &dto.MetricFamily{
+			Name: &testMetricSummary,
+			Type: &metricTypeSummary,
+			Help: &testMetricSummaryDescription,
+			Metric: []*dto.Metric{
+				{
+					Summary: &dto.Summary{
+						SampleCount: proto.Uint64(47),
+						SampleSum:   proto.Float64(130),
+						Quantile: []*dto.Quantile{
+							{
+								Quantile: proto.Float64(0),
+								Value:    proto.Float64(10),
+							},
+							{
+								Quantile: proto.Float64(0.5),
+								Value:    proto.Float64(20),
+							},
+							{
+								Quantile: proto.Float64(1.0),
+								Value:    proto.Float64(30),
+							},
+						},
+					},
+					TimestampMs: proto.Int64(1234568000432),
+				},
+			},
+		},
+		MetricResetTimestampMs: []int64{
+			1234567890432,
+		},
+	},
 }
 
 func TestToCreateTimeSeriesRequest(t *testing.T) {
@@ -192,7 +228,7 @@ func TestToCreateTimeSeriesRequest(t *testing.T) {
 	}
 
 	ts := request.TimeSeries
-	assert.Equal(t, 6, len(ts))
+	assert.Equal(t, 11, len(ts))
 
 	// First two counter values.
 	for i := 0; i <= 1; i++ {
@@ -279,6 +315,48 @@ func TestToCreateTimeSeriesRequest(t *testing.T) {
 	assert.Equal(t, int64(3), counts[1])
 	assert.Equal(t, int64(0), counts[2])
 	assert.Equal(t, int64(1), counts[3])
+
+	metric = ts[6]
+	assert.Equal(t, "gke_container", metric.Resource.Type)
+	assert.Equal(t, "metrics.prefix/test_summary_sum", metric.Metric.Type)
+	assert.Equal(t, metric_pb.MetricDescriptor_DOUBLE, metric.ValueType)
+	assert.Equal(t, metric_pb.MetricDescriptor_GAUGE, metric.MetricKind)
+	assert.Equal(t, 0, len(metric.Metric.Labels))
+	assert.InEpsilon(t, 130, metric.Points[0].Value.GetDoubleValue(), epsilon)
+	assert.Equal(t, &timestamp.Timestamp{Seconds: 1234568000, Nanos: 432000000}, metric.Points[0].Interval.EndTime)
+
+	metric = ts[7]
+	assert.Equal(t, "gke_container", metric.Resource.Type)
+	assert.Equal(t, "metrics.prefix/test_summary_count", metric.Metric.Type)
+	assert.Equal(t, metric_pb.MetricDescriptor_INT64, metric.ValueType)
+	assert.Equal(t, metric_pb.MetricDescriptor_GAUGE, metric.MetricKind)
+	assert.Equal(t, 0, len(metric.Metric.Labels))
+	assert.InEpsilon(t, 47, metric.Points[0].Value.GetInt64Value(), epsilon)
+	assert.Equal(t, &timestamp.Timestamp{Seconds: 1234568000, Nanos: 432000000}, metric.Points[0].Interval.EndTime)
+
+	// Summary metrics are exported as individual gauges for each quantile.
+	for i := 8; i <= 10; i++ {
+		metric = ts[i]
+		assert.Equal(t, "gke_container", metric.Resource.Type)
+		assert.Equal(t, "metrics.prefix/test_summary", metric.Metric.Type)
+		assert.Equal(t, metric_pb.MetricDescriptor_DOUBLE, metric.ValueType)
+		assert.Equal(t, metric_pb.MetricDescriptor_GAUGE, metric.MetricKind)
+
+		value := metric.Points[0].Value.GetDoubleValue()
+		labels := metric.Metric.Labels
+		assert.Equal(t, 1, len(labels))
+		switch q := labels["quantile"]; q {
+		case "0":
+			assert.InEpsilon(t, 10, value, epsilon)
+		case "0.5":
+			assert.InEpsilon(t, 20, value, epsilon)
+		case "1":
+			assert.InEpsilon(t, 30, value, epsilon)
+		default:
+			t.Errorf("Wrong label 'quantile' value %s", q)
+		}
+		assert.Equal(t, &timestamp.Timestamp{Seconds: 1234568000, Nanos: 432000000}, metric.Points[0].Interval.EndTime)
+	}
 }
 
 func TestUnknownMonitoredResource(t *testing.T) {
