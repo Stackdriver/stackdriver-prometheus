@@ -580,14 +580,13 @@ mainLoop:
 					scrapeErr = appErr
 				}
 			}
-
-			sl.buffers.Put(b)
 		} else {
 			level.Debug(sl.l).Log("msg", "Scrape failed", "err", scrapeErr.Error())
 			if errc != nil {
 				errc <- scrapeErr
 			}
 		}
+		sl.buffers.Put(b)
 
 		sl.report(start, time.Since(start), total, added, scrapeErr)
 		last = start
