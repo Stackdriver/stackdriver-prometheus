@@ -30,13 +30,20 @@ import (
 	"testing"
 	"time"
 
+	"github.com/go-kit/kit/log"
 	"github.com/gogo/protobuf/proto"
 	dto "github.com/prometheus/client_model/go"
 	"github.com/prometheus/common/model"
 	"github.com/prometheus/prometheus/config"
+	"github.com/prometheus/prometheus/discovery/targetgroup"
 	"github.com/prometheus/prometheus/pkg/labels"
 	"github.com/prometheus/prometheus/pkg/timestamp"
 	"github.com/stretchr/testify/require"
+)
+
+const (
+	scrapeTimeout   = model.Duration(1500 * time.Millisecond)
+	expectedTimeout = "1.500000"
 )
 
 // Implements resetPointMapper.
@@ -303,6 +310,84 @@ func TestScrapePoolAppender(t *testing.T) {
 	}
 	if _, ok := tl.Appender.(nopAppender); !ok {
 		t.Fatalf("Expected base appender but got %T", tl.Appender)
+	}
+}
+
+type functorAppendable struct {
+	f func(metricFamily *MetricFamily)
+}
+
+func (a functorAppendable) Appender() (Appender, error) {
+	return functorAppender{f: a.f}, nil
+}
+
+type functorAppender struct {
+	f func(metricFamily *MetricFamily)
+}
+
+func (a functorAppender) Add(metricFamily *MetricFamily) error {
+	a.f(metricFamily)
+	return nil
+}
+
+func TestScrapePoolSync(t *testing.T) {
+	server, serverURL := newServer(t)
+	defer server.Close()
+
+	cfg := &config.ScrapeConfig{
+		ScrapeInterval: model.Duration(3 * time.Second),
+		ScrapeTimeout:  scrapeTimeout,
+		MetricRelabelConfigs: []*config.RelabelConfig{
+			{
+				Action:       config.RelabelReplace,
+				Regex:        mustNewRegexp("(.*)"),
+				SourceLabels: model.LabelNames{"my_key"},
+				Replacement:  "${1}_copy",
+				TargetLabel:  "my_key_copy",
+			},
+		},
+	}
+	app := &functorAppendable{}
+	output := &bytes.Buffer{}
+	sp := newScrapePool(cfg, app, log.NewLogfmtLogger(output))
+	var once sync.Once
+	var wg sync.WaitGroup
+	var result *MetricFamily
+	wg.Add(1)
+	app.f = func(metricFamily *MetricFamily) {
+		once.Do(func() {
+			result = metricFamily
+			wg.Done()
+		})
+	}
+	targetGroup := []*targetgroup.Group{
+		{
+			Targets: []model.LabelSet{
+				{
+					model.SchemeLabel:  model.LabelValue(serverURL.Scheme),
+					model.AddressLabel: model.LabelValue(serverURL.Host),
+				},
+			},
+			Labels: model.LabelSet{"my_key": "my_value"},
+			Source: "test",
+		},
+	}
+	// Blocks until stop() is called on the scrapePool.
+	sp.Sync(targetGroup)
+	wg.Wait()
+	sp.stop()
+	if output.Len() > 0 {
+		t.Errorf("succeeded with messages %v", output.String())
+	}
+	want := []*dto.LabelPair{
+		{Name: proto.String(model.InstanceLabel), Value: proto.String(serverURL.Host)},
+		{Name: proto.String(model.JobLabel), Value: proto.String("")},
+		{Name: proto.String("my_key"), Value: proto.String("my_value")},
+		{Name: proto.String("my_key_copy"), Value: proto.String("my_value_copy")},
+	}
+	if !reflect.DeepEqual(want, result.GetMetric()[0].GetLabel()) {
+		t.Fatalf("Appended samples not as expected.\nWanted: %+v\nGot:    %+v",
+			want, result.GetMetric()[0].Label)
 	}
 }
 
@@ -995,27 +1080,9 @@ func TestPointExtractor(t *testing.T) {
 }
 
 func TestTargetScraperScrapeOK(t *testing.T) {
-	const (
-		configTimeout   = 1500 * time.Millisecond
-		expectedTimeout = "1.500000"
-	)
+	const configTimeout = 1500 * time.Millisecond
 
-	server := httptest.NewServer(
-		http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			accept := r.Header.Get("Accept")
-			if !strings.HasPrefix(accept, "text/plain;") {
-				t.Errorf("Expected Accept header to prefer text/plain, got %q", accept)
-			}
-
-			timeout := r.Header.Get("X-Prometheus-Scrape-Timeout-Seconds")
-			if timeout != expectedTimeout {
-				t.Errorf("Expected scrape timeout header %q, got %q", expectedTimeout, timeout)
-			}
-
-			w.Header().Set("Content-Type", `text/plain; version=0.0.4`)
-			w.Write([]byte("metric_a 1\nmetric_b 2\n"))
-		}),
-	)
+	server, serverURL := newServer(t)
 	defer server.Close()
 
 	serverURL, err := url.Parse(server.URL)
@@ -1259,4 +1326,29 @@ func addMetricLabels(metricFamily *MetricFamily, labelName, labelValue string) *
 		})
 	}
 	return metricFamily
+}
+
+func newServer(t *testing.T) (*httptest.Server, *url.URL) {
+	server := httptest.NewServer(
+		http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			accept := r.Header.Get("Accept")
+			if !strings.HasPrefix(accept, "text/plain;") {
+				t.Errorf("Expected Accept header to prefer text/plain, got %q", accept)
+			}
+
+			timeout := r.Header.Get("X-Prometheus-Scrape-Timeout-Seconds")
+			if timeout != expectedTimeout {
+				t.Errorf("Expected scrape timeout header %q, got %q", expectedTimeout, timeout)
+			}
+
+			w.Header().Set("Content-Type", `text/plain; version=0.0.4`)
+			w.Write([]byte("metric_a 1\nmetric_b 2\n"))
+		}),
+	)
+
+	serverURL, err := url.Parse(server.URL)
+	if err != nil {
+		panic(err)
+	}
+	return server, serverURL
 }
