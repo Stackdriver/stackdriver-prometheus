@@ -71,8 +71,8 @@ func relabel(input LabelPairs, cfg *config.RelabelConfig) LabelPairs {
 		if indexes == nil {
 			break
 		}
-		target := model.LabelName(cfg.Regex.ExpandString([]byte{}, cfg.TargetLabel, val, indexes))
-		if !target.IsValid() {
+		target := string(cfg.Regex.ExpandString([]byte{}, cfg.TargetLabel, val, indexes))
+		if !model.LabelName(target).IsValid() {
 			delete(lmap, cfg.TargetLabel)
 			break
 		}
@@ -81,7 +81,7 @@ func relabel(input LabelPairs, cfg *config.RelabelConfig) LabelPairs {
 			delete(lmap, cfg.TargetLabel)
 			break
 		}
-		lmap[string(target)] = proto.String(string(res))
+		lmap[target] = proto.String(string(res))
 	case config.RelabelHashMod:
 		mod := sum64(md5.Sum([]byte(val))) % cfg.Modulus
 		lmap[cfg.TargetLabel] = proto.String(fmt.Sprintf("%d", mod))
