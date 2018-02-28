@@ -388,7 +388,6 @@ func TestScrapePoolSync(t *testing.T) {
 	}
 	want := []*dto.LabelPair{
 		{Name: proto.String(model.InstanceLabel), Value: proto.String(serverURL.Host)},
-		{Name: proto.String(model.JobLabel), Value: proto.String("")},
 		{Name: proto.String("my_key"), Value: proto.String("my_value")},
 		{Name: proto.String("my_key_copy"), Value: proto.String("my_value_copy")},
 	}
@@ -1363,6 +1362,76 @@ func newServer(t *testing.T) (*httptest.Server, *url.URL) {
 		panic(err)
 	}
 	return server, serverURL
+}
+
+func TestExtractTargetLabels(t *testing.T) {
+	setUp := func() (metricLabels relabel.LabelPairs, targetLabels map[string]*labels.Label) {
+		targetLabels = map[string]*labels.Label{}
+		targetLabels["target_label"] = &labels.Label{Name: "target_label", Value: "target_value1"}
+		targetLabels["common_label"] = &labels.Label{Name: "common_label", Value: "target_value2"}
+		targetLabels["empty_target_label"] = &labels.Label{Name: "empty_target_label", Value: ""}
+		metricLabels = relabel.LabelPairs{
+			{
+				Name:  proto.String("metric_label"),
+				Value: proto.String("metric_value1"),
+			},
+			{
+				Name:  proto.String("common_label"),
+				Value: proto.String("metric_value2"),
+			},
+			{
+				Name:  proto.String("empty_metric_label"),
+				Value: proto.String(""),
+			},
+		}
+		return
+	}
+	t.Run("honorLabels=false", func(t *testing.T) {
+		metricLabels, targetLabels := setUp()
+		result := extractTargetLabels(metricLabels, targetLabels, false /*honorLabels*/)
+		expectedLabels := relabel.LabelPairs{
+			{
+				Name:  proto.String("metric_label"),
+				Value: proto.String("metric_value1"),
+			},
+			{
+				Name:  proto.String("exported_common_label"),
+				Value: proto.String("metric_value2"),
+			},
+			{
+				Name:  proto.String("target_label"),
+				Value: proto.String("target_value1"),
+			},
+			{
+				Name:  proto.String("common_label"),
+				Value: proto.String("target_value2"),
+			},
+		}
+		if !reflect.DeepEqual(expectedLabels, result) {
+			t.Fatalf("labels not as expected.\nWanted: %+v\nGot:    %+v", expectedLabels, result)
+		}
+	})
+	t.Run("honorLabels=true", func(t *testing.T) {
+		metricLabels, targetLabels := setUp()
+		result := extractTargetLabels(metricLabels, targetLabels, true /*honorLabels*/)
+		expectedLabels := relabel.LabelPairs{
+			{
+				Name:  proto.String("metric_label"),
+				Value: proto.String("metric_value1"),
+			},
+			{
+				Name:  proto.String("common_label"),
+				Value: proto.String("metric_value2"),
+			},
+			{
+				Name:  proto.String("target_label"),
+				Value: proto.String("target_value1"),
+			},
+		}
+		if !reflect.DeepEqual(expectedLabels, result) {
+			t.Fatalf("labels not as expected.\nWanted: %+v\nGot:    %+v", expectedLabels, result)
+		}
+	})
 }
 
 func BenchmarkExtractTargetLabels(b *testing.B) {

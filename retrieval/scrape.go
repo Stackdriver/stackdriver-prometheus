@@ -347,35 +347,46 @@ func (sp *scrapePool) mutateReportSampleLabels(metricLabels relabel.LabelPairs, 
 func extractTargetLabels(metricLabels relabel.LabelPairs, targetLabels map[string]*labels.Label, honorLabels bool) relabel.LabelPairs {
 	// Add any external labels. If an external label name is already
 	// found in the set of metric labels, don't add that label.
-	res := relabel.LabelPairs{}
 	if honorLabels {
+		labelsSeen := map[string]struct{}{}
 		for _, metricLabel := range metricLabels {
-			targetLabel, ok := targetLabels[*metricLabel.Name]
-			if ok && len(*metricLabel.Value) == 0 {
-				res = append(res, &dto.LabelPair{
-					Name:  metricLabel.Name,
-					Value: &targetLabel.Value,
-				})
+			labelsSeen[*metricLabel.Name] = struct{}{}
+		}
+		for i := range targetLabels {
+			if len(targetLabels[i].Value) > 0 {
+				_, ok := labelsSeen[targetLabels[i].Name]
+				if !ok {
+					metricLabels = append(metricLabels, &dto.LabelPair{
+						Name:  &targetLabels[i].Name,
+						Value: &targetLabels[i].Value,
+					})
+				}
 			}
+
 		}
 	} else {
 		for _, metricLabel := range metricLabels {
-			targetLabel, ok := targetLabels[*metricLabel.Name]
-			if ok && len(*metricLabel.Value) > 0 {
-				res = append(res, &dto.LabelPair{
-					Name:  proto.String(model.ExportedLabelPrefix + *metricLabel.Name),
-					Value: &targetLabel.Value,
-				})
+			_, ok := targetLabels[*metricLabel.Name]
+			if ok {
+				metricLabel.Name = proto.String(model.ExportedLabelPrefix + *metricLabel.Name)
 			}
 		}
 		for i := range targetLabels {
-			res = append(res, &dto.LabelPair{
-				Name:  &targetLabels[i].Name,
-				Value: &targetLabels[i].Value,
-			})
+			if len(targetLabels[i].Value) > 0 {
+				metricLabels = append(metricLabels, &dto.LabelPair{
+					Name:  &targetLabels[i].Name,
+					Value: &targetLabels[i].Value,
+				})
+			}
 		}
 	}
-	return res
+	// Drop labels with empty values. Works in-place, doesn't preserve order to avoid copy.
+	for i := 0; i < len(metricLabels); i++ {
+		if len(*metricLabels[i].Value) == 0 {
+			metricLabels = append(metricLabels[:i], metricLabels[i+1:]...)
+		}
+	}
+	return metricLabels
 }
 
 // appender returns an appender for ingested samples from the target.
