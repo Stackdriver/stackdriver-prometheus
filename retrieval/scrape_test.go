@@ -32,6 +32,7 @@ import (
 
 	"github.com/go-kit/kit/log"
 	"github.com/gogo/protobuf/proto"
+	"github.com/jkohen/prometheus/relabel"
 	dto "github.com/prometheus/client_model/go"
 	"github.com/prometheus/common/model"
 	"github.com/prometheus/prometheus/config"
@@ -345,6 +346,12 @@ func TestScrapePoolSync(t *testing.T) {
 				Replacement:  "${1}_copy",
 				TargetLabel:  "my_key_copy",
 			},
+			// TODO(jkohen): introduce a test file for relabel.go and move this more complex test case there.
+			{
+				Action:      config.RelabelLabelMap,
+				Regex:       mustNewRegexp("(.*)"),
+				Replacement: "${1}_clone",
+			},
 		},
 	}
 	app := &functorAppendable{}
@@ -385,9 +392,17 @@ func TestScrapePoolSync(t *testing.T) {
 		{Name: proto.String("my_key"), Value: proto.String("my_value")},
 		{Name: proto.String("my_key_copy"), Value: proto.String("my_value_copy")},
 	}
-	if !reflect.DeepEqual(want, result.GetMetric()[0].GetLabel()) {
-		t.Fatalf("Appended samples not as expected.\nWanted: %+v\nGot:    %+v",
-			want, result.GetMetric()[0].Label)
+	for _, pair := range want {
+		want = append(want, &dto.LabelPair{
+			Name:  proto.String(*pair.Name + "_clone"),
+			Value: proto.String(*pair.Value),
+		})
+	}
+	sort.Sort(LabelPairsByName(want))
+	got := result.GetMetric()[0].GetLabel()
+	sort.Sort(LabelPairsByName(got))
+	if !reflect.DeepEqual(want, got) {
+		t.Fatalf("Appended samples not as expected.\nWanted: %+v\nGot:    %+v", want, got)
 	}
 }
 
@@ -445,7 +460,7 @@ func TestScrapeLoopStopBeforeRun(t *testing.T) {
 	}
 }
 
-func nopMutator(l labels.Labels) labels.Labels { return l }
+func nopMutator(l relabel.LabelPairs) relabel.LabelPairs { return l }
 
 func TestScrapeLoopStop(t *testing.T) {
 	var (
@@ -638,10 +653,12 @@ func TestScrapeLoopMutator(t *testing.T) {
 	sl := newScrapeLoop(context.Background(),
 		nil, &fakeResetPointMap{},
 		nil, nil,
-		func(lset labels.Labels) labels.Labels {
-			lb := labels.NewBuilder(lset)
-			lb.Set("new_label", "foo")
-			return lb.Labels()
+		func(input relabel.LabelPairs) relabel.LabelPairs {
+			output := relabel.LabelPairs{}
+			for _, label := range input {
+				output = append(output, &dto.LabelPair{Name: label.Name, Value: label.Value})
+			}
+			return append(output, &dto.LabelPair{Name: proto.String("new_label"), Value: proto.String("foo")})
 		},
 		nopMutator,
 		func() Appender { return app },
@@ -673,19 +690,19 @@ func TestScrapeLoopMutatorDeletesMetric(t *testing.T) {
 	sl := newScrapeLoop(context.Background(),
 		nil, &fakeResetPointMap{},
 		nil, nil,
-		func(lset labels.Labels) labels.Labels {
-			var lb labels.Labels
+		func(lset relabel.LabelPairs) relabel.LabelPairs {
+			var lb relabel.LabelPairs
 			for _, label := range lset {
-				if label.Name == "delete" {
-					if label.Value == "label" {
+				if *label.Name == "delete" {
+					if *label.Value == "label" {
 						// delete this label
 						continue
-					} else if label.Value == "metric" {
+					} else if *label.Value == "metric" {
 						// delete whole metric
 						return nil
 					}
 				}
-				lb = append(lb, label)
+				lb = append(lb, &dto.LabelPair{Name: label.Name, Value: label.Value})
 			}
 			return lb
 		},
@@ -1084,11 +1101,6 @@ func TestTargetScraperScrapeOK(t *testing.T) {
 
 	server, serverURL := newServer(t)
 	defer server.Close()
-
-	serverURL, err := url.Parse(server.URL)
-	if err != nil {
-		panic(err)
-	}
 
 	ts := &targetScraper{
 		Target: &Target{

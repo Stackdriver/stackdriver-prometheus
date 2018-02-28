@@ -28,6 +28,7 @@ import (
 	"github.com/go-kit/kit/log"
 	"github.com/go-kit/kit/log/level"
 	"github.com/gogo/protobuf/proto"
+	"github.com/jkohen/prometheus/relabel"
 	"github.com/prometheus/client_golang/prometheus"
 	dto "github.com/prometheus/client_model/go"
 	"github.com/prometheus/common/expfmt"
@@ -37,7 +38,6 @@ import (
 	"github.com/prometheus/prometheus/discovery/targetgroup"
 	"github.com/prometheus/prometheus/pkg/labels"
 	"github.com/prometheus/prometheus/pkg/pool"
-	"github.com/prometheus/prometheus/pkg/relabel"
 	"github.com/prometheus/prometheus/pkg/timestamp"
 	"github.com/prometheus/prometheus/util/httputil"
 	"golang.org/x/net/context/ctxhttp"
@@ -135,7 +135,7 @@ const (
 	maxAheadTime = 10 * time.Minute
 )
 
-type labelsMutator func(labels.Labels) labels.Labels
+type labelsMutator func(relabel.LabelPairs) relabel.LabelPairs
 
 func newScrapePool(cfg *config.ScrapeConfig, app Appendable, logger log.Logger) *scrapePool {
 	if logger == nil {
@@ -167,8 +167,8 @@ func newScrapePool(cfg *config.ScrapeConfig, app Appendable, logger log.Logger) 
 			t,
 			log.With(logger, "target", t),
 			buffers,
-			func(l labels.Labels) labels.Labels { return sp.mutateSampleLabels(l, t) },
-			func(l labels.Labels) labels.Labels { return sp.mutateReportSampleLabels(l, t) },
+			func(l relabel.LabelPairs) relabel.LabelPairs { return sp.mutateSampleLabels(l, t) },
+			func(l relabel.LabelPairs) relabel.LabelPairs { return sp.mutateReportSampleLabels(l, t) },
 			sp.appender,
 		)
 	}
@@ -328,46 +328,54 @@ func (sp *scrapePool) sync(targets []*Target) {
 	wg.Wait()
 }
 
-func (sp *scrapePool) mutateSampleLabels(lset labels.Labels, target *Target) labels.Labels {
-	lb := labels.NewBuilder(lset)
-
-	if sp.config.HonorLabels {
-		for _, l := range target.Labels() {
-			if lv := lset.Get(l.Name); lv == "" {
-				lb.Set(l.Name, l.Value)
-			}
-		}
-	} else {
-		for _, l := range target.Labels() {
-			lv := lset.Get(l.Name)
-			if lv != "" {
-				lb.Set(model.ExportedLabelPrefix+l.Name, lv)
-			}
-			lb.Set(l.Name, l.Value)
-		}
-	}
-
-	res := lb.Labels()
-
+func (sp *scrapePool) mutateSampleLabels(metricLabels relabel.LabelPairs, target *Target) relabel.LabelPairs {
+	res := extractTargetLabels(metricLabels, target.Labels(), sp.config.HonorLabels)
 	if mrc := sp.config.MetricRelabelConfigs; len(mrc) > 0 {
 		res = relabel.Process(res, mrc...)
 	}
-
 	return res
 }
 
-func (sp *scrapePool) mutateReportSampleLabels(lset labels.Labels, target *Target) labels.Labels {
-	lb := labels.NewBuilder(lset)
+func (sp *scrapePool) mutateReportSampleLabels(metricLabels relabel.LabelPairs, target *Target) relabel.LabelPairs {
+	return extractTargetLabels(metricLabels, target.Labels(), false /*honorLabels*/)
+}
 
-	for _, l := range target.Labels() {
-		lv := lset.Get(l.Name)
-		if lv != "" {
-			lb.Set(model.ExportedLabelPrefix+l.Name, lv)
-		}
-		lb.Set(l.Name, l.Value)
+func extractTargetLabels(metricLabels relabel.LabelPairs, targetLabels labels.Labels, honorLabels bool) relabel.LabelPairs {
+	// Add any external labels. If an external label name is already
+	// found in the set of metric labels, don't add that label.
+	targetLabelMap := make(map[string]*labels.Label)
+	for i := range targetLabels {
+		targetLabelMap[targetLabels[i].Name] = &targetLabels[i]
 	}
-
-	return lb.Labels()
+	res := relabel.LabelPairs{}
+	if honorLabels {
+		for _, metricLabel := range metricLabels {
+			targetLabel, ok := targetLabelMap[*metricLabel.Name]
+			if ok && len(*metricLabel.Value) == 0 {
+				res = append(res, &dto.LabelPair{
+					Name:  metricLabel.Name,
+					Value: &targetLabel.Value,
+				})
+			}
+		}
+	} else {
+		for _, metricLabel := range metricLabels {
+			targetLabel, ok := targetLabelMap[*metricLabel.Name]
+			if ok && len(*metricLabel.Value) > 0 {
+				res = append(res, &dto.LabelPair{
+					Name:  proto.String(model.ExportedLabelPrefix + *metricLabel.Name),
+					Value: &targetLabel.Value,
+				})
+			}
+		}
+		for _, labelPair := range targetLabelMap {
+			res = append(res, &dto.LabelPair{
+				Name:  &labelPair.Name,
+				Value: &labelPair.Value,
+			})
+		}
+	}
+	return res
 }
 
 // appender returns an appender for ingested samples from the target.
@@ -611,24 +619,9 @@ func (sl *scrapeLoop) stop() {
 }
 
 type sample struct {
-	metric labels.Labels
+	metric relabel.LabelPairs
 	t      int64
 	v      float64
-}
-
-type samples []sample
-
-func (s samples) Len() int      { return len(s) }
-func (s samples) Swap(i, j int) { s[i], s[j] = s[j], s[i] }
-
-func (s samples) Less(i, j int) bool {
-	d := labels.Compare(s[i].metric, s[j].metric)
-	if d < 0 {
-		return true
-	} else if d > 0 {
-		return false
-	}
-	return s[i].t < s[j].t
 }
 
 func (sl *scrapeLoop) append(b []byte, ts time.Time) (total, added int, err error) {
@@ -758,12 +751,14 @@ func (sl *scrapeLoop) report(start time.Time, duration time.Duration, scraped, a
 	return nil
 }
 
+var metricLabelName = labels.MetricName
+
 func (sl *scrapeLoop) addReportSample(app Appender, name string, t int64, v float64) error {
-	lset := labels.Labels{
-		labels.Label{Name: labels.MetricName, Value: name},
+	metricLabels := relabel.LabelPairs{
+		{Name: &metricLabelName, Value: &name},
 	}
 
-	lset = sl.reportSampleMutator(lset)
+	metricLabels = sl.reportSampleMutator(metricLabels)
 
 	// TODO(jkohen): reportSampleMutator calls mutateReportSampleLabels, which returns the metric name and the target labels, so we could simplify the code to do just that.
 
@@ -776,7 +771,7 @@ func (sl *scrapeLoop) addReportSample(app Appender, name string, t int64, v floa
 					Value: proto.Float64(v),
 				},
 				TimestampMs: proto.Int64(t),
-				Label:       LabelsToLabelPairs(lset),
+				Label:       metricLabels,
 			},
 		},
 	}
@@ -791,21 +786,23 @@ func (sl *scrapeLoop) addReportSample(app Appender, name string, t int64, v floa
 	}
 }
 
-// relabelMetrics returns null if the relabeling requested the metric to be dropped.
+// relabelMetrics returns nil if the relabeling requested the metric to be dropped.
 func relabelMetrics(inputMetrics []*dto.Metric, mutator labelsMutator) []*dto.Metric {
 	metrics := []*dto.Metric{}
 	for _, metric := range inputMetrics {
-		lset := LabelPairsToLabels(metric.Label)
-
-		// Add target labels and relabeling and store the final label set.
-		lset = mutator(lset)
-		// The label set may be set to nil to indicate dropping.
-		if lset == nil {
-			continue
+		if metric.Label == nil {
+			// Need to distinguish dropped labels from uninitialized.
+			metric.Label = []*dto.LabelPair{}
 		}
-
-		metric.Label = LabelsToLabelPairs(lset)
-		metrics = append(metrics, metric)
+		// Add target labels and relabeling and store the final label set.
+		metric.Label = mutator(metric.Label)
+		// The label set may be set to nil to indicate dropping.
+		if metric.Label != nil {
+			if len(metric.Label) == 0 {
+				metric.Label = nil
+			}
+			metrics = append(metrics, metric)
+		}
 	}
 	if len(metrics) == 0 {
 		return nil

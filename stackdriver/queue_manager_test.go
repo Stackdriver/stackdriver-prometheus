@@ -165,7 +165,8 @@ func TestRelabel(t *testing.T) {
 			}, Value: float64(i)})
 		expectedSamples = append(expectedSamples,
 			sample{Name: name, Labels: map[string]string{
-				"external": "a",
+				"external_1": "a",
+				"external_2": "b",
 			}, Value: float64(i)})
 	}
 	i := n - 1
@@ -186,7 +187,8 @@ func TestRelabel(t *testing.T) {
 
 	m := NewQueueManager(nil, config.DefaultQueueConfig,
 		model.LabelSet{
-			"external": "a",
+			"external_1": "a",
+			"external_2": "b",
 		},
 		[]*config.RelabelConfig{
 			{

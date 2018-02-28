@@ -20,13 +20,13 @@ import (
 
 	"github.com/go-kit/kit/log"
 	"github.com/go-kit/kit/log/level"
+	"github.com/gogo/protobuf/proto"
+	"github.com/jkohen/prometheus/relabel"
 	"github.com/jkohen/prometheus/retrieval"
 	"github.com/prometheus/client_golang/prometheus"
 	dto "github.com/prometheus/client_model/go"
 	"github.com/prometheus/common/model"
 	"github.com/prometheus/prometheus/config"
-	"github.com/prometheus/prometheus/pkg/labels"
-	"github.com/prometheus/prometheus/pkg/relabel"
 	"golang.org/x/time/rate"
 	monitoring "google.golang.org/genproto/googleapis/monitoring/v3"
 )
@@ -149,7 +149,7 @@ type QueueManager struct {
 	logger log.Logger
 
 	cfg              config.QueueConfig
-	externalLabels   model.LabelSet
+	externalLabels   map[string]*string
 	relabelConfigs   []*config.RelabelConfig
 	clientFactory    StorageClientFactory
 	queueName        string
@@ -167,7 +167,7 @@ type QueueManager struct {
 }
 
 // NewQueueManager builds a new QueueManager.
-func NewQueueManager(logger log.Logger, cfg config.QueueConfig, externalLabels model.LabelSet, relabelConfigs []*config.RelabelConfig, clientFactory StorageClientFactory, sdCfg *StackdriverConfig) *QueueManager {
+func NewQueueManager(logger log.Logger, cfg config.QueueConfig, externalLabelSet model.LabelSet, relabelConfigs []*config.RelabelConfig, clientFactory StorageClientFactory, sdCfg *StackdriverConfig) *QueueManager {
 	if logger == nil {
 		logger = log.NewNopLogger()
 	}
@@ -176,6 +176,10 @@ func NewQueueManager(logger log.Logger, cfg config.QueueConfig, externalLabels m
 		resourceMappings = K8sResourceMappings
 	}
 
+	externalLabels := make(map[string]*string, len(externalLabelSet))
+	for ln, lv := range externalLabelSet {
+		externalLabels[string(ln)] = proto.String(string(lv))
+	}
 	t := &QueueManager{
 		logger:           logger,
 		cfg:              cfg,
@@ -476,31 +480,33 @@ func (s *shards) sendSamples(client StorageClient, samples []*retrieval.MetricFa
 func (t *QueueManager) relabelMetrics(inputMetrics []*dto.Metric) []*dto.Metric {
 	metrics := []*dto.Metric{}
 	for _, metric := range inputMetrics {
-		metricLabels := retrieval.LabelPairsToLabels(metric.Label)
-
+		if metric.Label == nil {
+			// Need to distinguish dropped labels from uninitialized.
+			metric.Label = []*dto.LabelPair{}
+		}
 		// Add any external labels. If an external label name is already
 		// found in the set of metric labels, don't add that label.
 		lset := make(map[string]struct{})
-		for i := range metricLabels {
-			lset[metricLabels[i].Name] = struct{}{}
+		for i := range metric.Label {
+			lset[*metric.Label[i].Name] = struct{}{}
 		}
 		for ln, lv := range t.externalLabels {
-			if _, ok := lset[string(ln)]; !ok {
-				metricLabels = append(metricLabels, labels.Label{
-					Name:  string(ln),
-					Value: string(lv),
+			if _, ok := lset[ln]; !ok {
+				metric.Label = append(metric.Label, &dto.LabelPair{
+					Name:  proto.String(ln),
+					Value: lv,
 				})
 			}
 		}
 
-		metricLabels = relabel.Process(metricLabels, t.relabelConfigs...)
-
+		metric.Label = relabel.Process(metric.Label, t.relabelConfigs...)
 		// The label set may be set to nil to indicate dropping.
-		if metricLabels == nil {
-			continue
+		if metric.Label != nil {
+			if len(metric.Label) == 0 {
+				metric.Label = nil
+			}
+			metrics = append(metrics, metric)
 		}
-		metric.Label = retrieval.LabelsToLabelPairs(metricLabels)
-		metrics = append(metrics, metric)
 	}
 	if len(metrics) == 0 {
 		return nil
