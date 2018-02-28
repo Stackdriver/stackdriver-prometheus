@@ -31,11 +31,7 @@ type LabelPairs []*dto.LabelPair
 // If a label set is dropped, nil is returned.
 func Process(labels LabelPairs, cfgs ...*config.RelabelConfig) LabelPairs {
 	for _, cfg := range cfgs {
-		lmap := make(map[string]*string)
-		for i := range labels {
-			lmap[*labels[i].Name] = labels[i].Value
-		}
-		labels = relabel(labels, lmap, cfg)
+		labels = relabel(labels, cfg)
 		if labels == nil {
 			return nil
 		}
@@ -45,7 +41,11 @@ func Process(labels LabelPairs, cfgs ...*config.RelabelConfig) LabelPairs {
 
 var emptyLabelValue = ""
 
-func relabel(input LabelPairs, lmap map[string]*string, cfg *config.RelabelConfig) LabelPairs {
+func relabel(input LabelPairs, cfg *config.RelabelConfig) LabelPairs {
+	lmap := make(map[string]*string)
+	for i := range input {
+		lmap[*input[i].Name] = input[i].Value
+	}
 	values := make([]string, 0, len(cfg.SourceLabels))
 	for _, ln := range cfg.SourceLabels {
 		lv := lmap[string(ln)]
