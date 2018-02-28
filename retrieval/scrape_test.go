@@ -1364,3 +1364,26 @@ func newServer(t *testing.T) (*httptest.Server, *url.URL) {
 	}
 	return server, serverURL
 }
+
+func BenchmarkExtractTargetLabels(b *testing.B) {
+	b.ReportAllocs()
+	m := map[string]string{}
+	for i := 0; i < 10; i++ {
+		m[fmt.Sprintf("target_label%d", i)] = fmt.Sprintf("%d:foo oaeu aoeu aoeu aoeu ou", i)
+	}
+	targetLabels := labels.FromMap(m)
+	metricLabels := relabel.LabelPairs{
+		{
+			Name:  proto.String("metric_label1"),
+			Value: proto.String("metric_value1"),
+		},
+		{
+			Name:  proto.String("metric_label2"),
+			Value: proto.String("metric_value2"),
+		},
+	}
+
+	for i := 0; i < b.N; i++ {
+		extractTargetLabels(metricLabels, targetLabels, false /*honorLabels*/)
+	}
+}

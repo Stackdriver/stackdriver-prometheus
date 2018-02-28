@@ -343,9 +343,9 @@ func (sp *scrapePool) mutateReportSampleLabels(metricLabels relabel.LabelPairs, 
 func extractTargetLabels(metricLabels relabel.LabelPairs, targetLabels labels.Labels, honorLabels bool) relabel.LabelPairs {
 	// Add any external labels. If an external label name is already
 	// found in the set of metric labels, don't add that label.
-	targetLabelMap := make(map[string]*labels.Label)
+	targetLabelMap := make(map[string]*string)
 	for i := range targetLabels {
-		targetLabelMap[targetLabels[i].Name] = &targetLabels[i]
+		targetLabelMap[targetLabels[i].Name] = &targetLabels[i].Value
 	}
 	res := relabel.LabelPairs{}
 	if honorLabels {
@@ -354,7 +354,7 @@ func extractTargetLabels(metricLabels relabel.LabelPairs, targetLabels labels.La
 			if ok && len(*metricLabel.Value) == 0 {
 				res = append(res, &dto.LabelPair{
 					Name:  metricLabel.Name,
-					Value: &targetLabel.Value,
+					Value: targetLabel,
 				})
 			}
 		}
@@ -364,14 +364,14 @@ func extractTargetLabels(metricLabels relabel.LabelPairs, targetLabels labels.La
 			if ok && len(*metricLabel.Value) > 0 {
 				res = append(res, &dto.LabelPair{
 					Name:  proto.String(model.ExportedLabelPrefix + *metricLabel.Name),
-					Value: &targetLabel.Value,
+					Value: targetLabel,
 				})
 			}
 		}
-		for _, labelPair := range targetLabelMap {
+		for i := range targetLabels {
 			res = append(res, &dto.LabelPair{
-				Name:  &labelPair.Name,
-				Value: &labelPair.Value,
+				Name:  &targetLabels[i].Name,
+				Value: &targetLabels[i].Value,
 			})
 		}
 	}
