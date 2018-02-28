@@ -1367,11 +1367,12 @@ func newServer(t *testing.T) (*httptest.Server, *url.URL) {
 
 func BenchmarkExtractTargetLabels(b *testing.B) {
 	b.ReportAllocs()
-	m := map[string]string{}
+	targetLabels := map[string]*labels.Label{}
 	for i := 0; i < 10; i++ {
-		m[fmt.Sprintf("target_label%d", i)] = fmt.Sprintf("%d:foo oaeu aoeu aoeu aoeu ou", i)
+		key := fmt.Sprintf("target_label%d", i)
+		value := fmt.Sprintf("%d:foo oaeu aoeu aoeu aoeu ou", i)
+		targetLabels[key] = &labels.Label{Name: key, Value: value}
 	}
-	targetLabels := labels.FromMap(m)
 	metricLabels := relabel.LabelPairs{
 		{
 			Name:  proto.String("metric_label1"),

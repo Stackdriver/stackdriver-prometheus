@@ -161,14 +161,19 @@ func newScrapePool(cfg *config.ScrapeConfig, app Appendable, logger log.Logger) 
 		logger:     logger,
 	}
 	sp.newLoop = func(t *Target, s scraper) loop {
+		targetLabelMap := make(map[string]*labels.Label)
+		targetLabels := t.Labels()
+		for i := range targetLabels {
+			targetLabelMap[targetLabels[i].Name] = &targetLabels[i]
+		}
 		return newScrapeLoop(
 			ctx,
 			s,
 			t,
 			log.With(logger, "target", t),
 			buffers,
-			func(l relabel.LabelPairs) relabel.LabelPairs { return sp.mutateSampleLabels(l, t) },
-			func(l relabel.LabelPairs) relabel.LabelPairs { return sp.mutateReportSampleLabels(l, t) },
+			func(l relabel.LabelPairs) relabel.LabelPairs { return sp.mutateSampleLabels(l, targetLabelMap) },
+			func(l relabel.LabelPairs) relabel.LabelPairs { return sp.mutateReportSampleLabels(l, targetLabelMap) },
 			sp.appender,
 		)
 	}
@@ -328,43 +333,39 @@ func (sp *scrapePool) sync(targets []*Target) {
 	wg.Wait()
 }
 
-func (sp *scrapePool) mutateSampleLabels(metricLabels relabel.LabelPairs, target *Target) relabel.LabelPairs {
-	res := extractTargetLabels(metricLabels, target.Labels(), sp.config.HonorLabels)
+func (sp *scrapePool) mutateSampleLabels(metricLabels relabel.LabelPairs, targetLabels map[string]*labels.Label) relabel.LabelPairs {
+	res := extractTargetLabels(metricLabels, targetLabels, sp.config.HonorLabels)
 	if mrc := sp.config.MetricRelabelConfigs; len(mrc) > 0 {
 		res = relabel.Process(res, mrc...)
 	}
 	return res
 }
 
-func (sp *scrapePool) mutateReportSampleLabels(metricLabels relabel.LabelPairs, target *Target) relabel.LabelPairs {
-	return extractTargetLabels(metricLabels, target.Labels(), false /*honorLabels*/)
+func (sp *scrapePool) mutateReportSampleLabels(metricLabels relabel.LabelPairs, targetLabels map[string]*labels.Label) relabel.LabelPairs {
+	return extractTargetLabels(metricLabels, targetLabels, false /*honorLabels*/)
 }
 
-func extractTargetLabels(metricLabels relabel.LabelPairs, targetLabels labels.Labels, honorLabels bool) relabel.LabelPairs {
+func extractTargetLabels(metricLabels relabel.LabelPairs, targetLabels map[string]*labels.Label, honorLabels bool) relabel.LabelPairs {
 	// Add any external labels. If an external label name is already
 	// found in the set of metric labels, don't add that label.
-	targetLabelMap := make(map[string]*string)
-	for i := range targetLabels {
-		targetLabelMap[targetLabels[i].Name] = &targetLabels[i].Value
-	}
 	res := relabel.LabelPairs{}
 	if honorLabels {
 		for _, metricLabel := range metricLabels {
-			targetLabel, ok := targetLabelMap[*metricLabel.Name]
+			targetLabel, ok := targetLabels[*metricLabel.Name]
 			if ok && len(*metricLabel.Value) == 0 {
 				res = append(res, &dto.LabelPair{
 					Name:  metricLabel.Name,
-					Value: targetLabel,
+					Value: &targetLabel.Value,
 				})
 			}
 		}
 	} else {
 		for _, metricLabel := range metricLabels {
-			targetLabel, ok := targetLabelMap[*metricLabel.Name]
+			targetLabel, ok := targetLabels[*metricLabel.Name]
 			if ok && len(*metricLabel.Value) > 0 {
 				res = append(res, &dto.LabelPair{
 					Name:  proto.String(model.ExportedLabelPrefix + *metricLabel.Name),
-					Value: targetLabel,
+					Value: &targetLabel.Value,
 				})
 			}
 		}
