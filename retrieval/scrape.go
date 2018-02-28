@@ -21,7 +21,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"strings"
 	"sync"
 	"time"
 
@@ -628,7 +627,7 @@ type sample struct {
 func (sl *scrapeLoop) append(b []byte, ts time.Time) (total, added int, err error) {
 	var (
 		parser                      = expfmt.TextParser{}
-		metricFamilies, parserError = parser.TextToMetricFamilies(strings.NewReader(string(b)))
+		metricFamilies, parserError = parser.TextToMetricFamilies(bytes.NewReader(b))
 		defTime                     = timestamp.FromTime(ts)
 	)
 	if parserError != nil {
