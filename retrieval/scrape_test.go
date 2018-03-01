@@ -1386,6 +1386,15 @@ func TestExtractTargetLabels(t *testing.T) {
 		}
 		return
 	}
+	mrc := []*config.RelabelConfig{
+		{
+			Action:       config.RelabelReplace,
+			Regex:        config.MustNewRegexp("(.*)"),
+			SourceLabels: model.LabelNames{"target_label"},
+			Replacement:  "machine",
+			TargetLabel:  "target_label",
+		},
+	}
 	t.Run("honorLabels=false", func(t *testing.T) {
 		metricLabels, targetLabels := setUp()
 		result := extractTargetLabels(metricLabels, targetLabels, false /*honorLabels*/)
@@ -1407,8 +1416,15 @@ func TestExtractTargetLabels(t *testing.T) {
 				Value: proto.String("target_value2"),
 			},
 		}
+		sort.Sort(LabelPairsByName(expectedLabels))
+		sort.Sort(LabelPairsByName(result))
 		if !reflect.DeepEqual(expectedLabels, result) {
 			t.Fatalf("labels not as expected.\nWanted: %+v\nGot:    %+v", expectedLabels, result)
+		}
+		result = relabel.Process(result, mrc...)
+		_, expectedTargetLabels := setUp()
+		if !reflect.DeepEqual(expectedTargetLabels, targetLabels) {
+			t.Fatalf("labels not as expected.\nWanted: %+v\nGot:    %+v", expectedTargetLabels, targetLabels)
 		}
 	})
 	t.Run("honorLabels=true", func(t *testing.T) {
@@ -1428,8 +1444,15 @@ func TestExtractTargetLabels(t *testing.T) {
 				Value: proto.String("target_value1"),
 			},
 		}
+		sort.Sort(LabelPairsByName(expectedLabels))
+		sort.Sort(LabelPairsByName(result))
 		if !reflect.DeepEqual(expectedLabels, result) {
 			t.Fatalf("labels not as expected.\nWanted: %+v\nGot:    %+v", expectedLabels, result)
+		}
+		result = relabel.Process(result, mrc...)
+		_, expectedTargetLabels := setUp()
+		if !reflect.DeepEqual(expectedTargetLabels, targetLabels) {
+			t.Fatalf("labels not as expected.\nWanted: %+v\nGot:    %+v", expectedTargetLabels, targetLabels)
 		}
 	})
 }
