@@ -14,10 +14,28 @@
 package retrieval
 
 import (
+	"reflect"
 	"testing"
 
 	"github.com/prometheus/prometheus/pkg/labels"
 )
+
+func TestLabelConversion(t *testing.T) {
+	originalLset := labels.FromMap(map[string]string{
+		"label1": "1:foo oaeu aoeu aoeu aoeu ou",
+		"label2": "2:foo oaeu aoeu aoeu aoeu ou",
+		"label3": "3:foo oaeu aoeu aoeu aoeu ou",
+		"label4": "4:foo oaeu aoeu aoeu aoeu ou",
+		"label5": "5:foo oaeu aoeu aoeu aoeu ou",
+	})
+	labelPairs := LabelsToLabelPairs(originalLset)
+	// Move label arounds to ensure the result is sorted.
+	labelPairs[0], labelPairs[1] = labelPairs[1], labelPairs[0]
+	lset := LabelPairsToLabels(labelPairs)
+	if !reflect.DeepEqual(originalLset, lset) {
+		t.Fatalf("labels not as expected.\nWanted: %+v\nGot:    %+v", originalLset, lset)
+	}
+}
 
 func BenchmarkLabelsToLabelPairs(b *testing.B) {
 	b.ReportAllocs()

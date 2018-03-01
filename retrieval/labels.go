@@ -14,6 +14,8 @@
 package retrieval
 
 import (
+	"sort"
+
 	dto "github.com/prometheus/client_model/go"
 	"github.com/prometheus/prometheus/pkg/labels"
 )
@@ -26,6 +28,8 @@ func LabelPairsToLabels(input []*dto.LabelPair) (output labels.Labels) {
 			Value: label.GetValue(),
 		})
 	}
+	// Some code expect these to be in order.
+	sort.Sort(output)
 	return
 }
 
