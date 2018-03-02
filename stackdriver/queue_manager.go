@@ -421,6 +421,11 @@ func (s *shards) runShard(i int) {
 	pendingSamples := make([]*retrieval.MetricFamily, 0, s.qm.cfg.MaxSamplesPerSend)
 
 	timer := time.NewTimer(s.qm.cfg.BatchSendDeadline)
+	defer func() {
+		if !timer.Stop() {
+			<-timer.C
+		}
+	}()
 
 	for {
 		select {
