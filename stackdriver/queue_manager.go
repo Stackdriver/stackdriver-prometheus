@@ -213,10 +213,16 @@ func NewQueueManager(logger log.Logger, cfg config.QueueConfig, externalLabelSet
 // sample on the floor if the queue is full.
 // Always returns nil.
 func (t *QueueManager) Append(metricFamily *retrieval.MetricFamily) error {
-	metricFamily.Metric = t.relabelMetrics(metricFamily.Metric)
+	metricFamily = t.relabelMetrics(metricFamily)
 	// Drop family if we dropped all metrics.
 	if metricFamily.Metric == nil {
 		return nil
+	}
+	if len(metricFamily.Metric) != len(metricFamily.MetricResetTimestampMs) {
+		level.Error(t.logger).Log(
+			"msg", "bug: number of metrics and reset timestamps must match",
+			"metrics", len(metricFamily.Metric),
+			"reset_ts", len(metricFamily.MetricResetTimestampMs))
 	}
 
 	t.shardsMtx.RLock()
@@ -488,9 +494,10 @@ func (s *shards) sendSamples(client StorageClient, samples []*retrieval.MetricFa
 }
 
 // relabelMetrics returns nil if the relabeling requested the metric to be dropped.
-func (t *QueueManager) relabelMetrics(inputMetrics []*dto.Metric) []*dto.Metric {
+func (t *QueueManager) relabelMetrics(metricFamily *retrieval.MetricFamily) *retrieval.MetricFamily {
 	metrics := []*dto.Metric{}
-	for _, metric := range inputMetrics {
+	resetTimestamps := []int64{}
+	for i, metric := range metricFamily.Metric {
 		if metric.Label == nil {
 			// Need to distinguish dropped labels from uninitialized.
 			metric.Label = []*dto.LabelPair{}
@@ -517,10 +524,10 @@ func (t *QueueManager) relabelMetrics(inputMetrics []*dto.Metric) []*dto.Metric 
 				metric.Label = nil
 			}
 			metrics = append(metrics, metric)
+			resetTimestamps = append(resetTimestamps, metricFamily.MetricResetTimestampMs[i])
 		}
 	}
-	if len(metrics) == 0 {
-		return nil
-	}
-	return metrics
+	metricFamily.Metric = metrics
+	metricFamily.MetricResetTimestampMs = resetTimestamps
+	return metricFamily
 }

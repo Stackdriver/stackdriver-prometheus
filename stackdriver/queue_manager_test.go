@@ -37,9 +37,10 @@ type TestStorageClient struct {
 }
 
 type sample struct {
-	Name   string
-	Labels map[string]string
-	Value  float64
+	Name           string
+	Labels         map[string]string
+	Value          float64
+	ResetTimestamp int64
 }
 
 func init() {
@@ -97,10 +98,16 @@ func (c *TestStorageClient) Store(req *monitoring.CreateTimeSeriesRequest) error
 		name := metricType[len(metricsPrefix)+1:]
 		for _, point := range ts.Points {
 			count++
+			startTime := point.GetInterval().GetStartTime()
+			var resetTimeMs int64
+			if startTime != nil {
+				resetTimeMs = time.Unix(startTime.Seconds, int64(startTime.Nanos)).UnixNano() / 1000000
+			}
 			s := sample{
-				Name:   name,
-				Labels: ts.Metric.Labels,
-				Value:  point.Value.GetDoubleValue(),
+				Name:           name,
+				Labels:         ts.Metric.Labels,
+				Value:          point.Value.GetDoubleValue(),
+				ResetTimestamp: resetTimeMs,
 			}
 			c.receivedSamples[name] = append(c.receivedSamples[name], s)
 		}
@@ -130,7 +137,12 @@ func TestSampleDelivery(t *testing.T) {
 	samples := make([]sample, 0, n)
 	for i := 0; i < n; i++ {
 		name := fmt.Sprintf("test_metric_%d", i)
-		samples = append(samples, sample{Name: name, Labels: map[string]string{}, Value: float64(i)})
+		samples = append(samples, sample{
+			Name:           name,
+			Labels:         map[string]string{},
+			Value:          float64(i),
+			ResetTimestamp: 1234567890000,
+		})
 	}
 
 	c := NewTestStorageClient()
@@ -143,7 +155,7 @@ func TestSampleDelivery(t *testing.T) {
 
 	// These should be received by the client.
 	for _, s := range samples {
-		m.Append(sampleToMetricFamily(s))
+		m.Append(samplesToMetricFamily(s))
 	}
 	m.Start()
 	defer m.Stop()
@@ -153,7 +165,7 @@ func TestSampleDelivery(t *testing.T) {
 
 func TestRelabel(t *testing.T) {
 	// This will cause a flush right away.
-	n := config.DefaultQueueConfig.MaxSamplesPerSend + 1
+	n := config.DefaultQueueConfig.MaxSamplesPerSend
 
 	samples := make([]sample, 0, n)
 	expectedSamples := make([]sample, 0, n)
@@ -162,21 +174,32 @@ func TestRelabel(t *testing.T) {
 		samples = append(samples,
 			sample{Name: name, Labels: map[string]string{
 				"drop_label": "x",
-			}, Value: float64(i)})
+			}, Value: float64(i), ResetTimestamp: 1234567890000})
 		expectedSamples = append(expectedSamples,
 			sample{Name: name, Labels: map[string]string{
 				"external_1": "a",
 				"external_2": "b",
-			}, Value: float64(i)})
+			}, Value: float64(i), ResetTimestamp: 1234567890000})
 	}
 	i := n - 1
-	{
-		samples = append(samples,
-			sample{Name: fmt.Sprintf("test_metric_%d", i),
-				Labels: map[string]string{
-					"drop_metric": "true",
-				}, Value: float64(i)})
+	// Ensure that the metrics and reset timestamps stay synchronized after
+	// dropping metrics from the family.
+	multiMetricSamples := []sample{
+		{Name: "multi_metric",
+			Labels: map[string]string{
+				"drop_metric": "true",
+			}, Value: float64(i), ResetTimestamp: 1234567890000},
+		{Name: "multi_metric",
+			Labels: map[string]string{
+				"keep_metric": "true",
+			}, Value: float64(i), ResetTimestamp: 1234567890001},
 	}
+	expectedSamples = append(expectedSamples,
+		sample{Name: "multi_metric", Labels: map[string]string{
+			"keep_metric": "true",
+			"external_1":  "a",
+			"external_2":  "b",
+		}, Value: float64(i), ResetTimestamp: 1234567890001})
 
 	c := NewTestStorageClient()
 	if len(expectedSamples) != config.DefaultQueueConfig.MaxSamplesPerSend {
@@ -204,8 +227,10 @@ func TestRelabel(t *testing.T) {
 		c, &DefaultStackdriverConfig)
 
 	for _, s := range samples {
-		m.Append(sampleToMetricFamily(s))
+		m.Append(samplesToMetricFamily(s))
 	}
+	m.Append(samplesToMetricFamily(multiMetricSamples...))
+
 	m.Start()
 	defer m.Stop()
 
@@ -219,7 +244,12 @@ func TestSampleDeliveryOrder(t *testing.T) {
 	samples := make([]sample, 0, n)
 	for i := 0; i < n; i++ {
 		name := fmt.Sprintf("test_metric_%d", i%ts)
-		samples = append(samples, sample{Name: name, Labels: map[string]string{}, Value: float64(i)})
+		samples = append(samples, sample{
+			Name:           name,
+			Labels:         map[string]string{},
+			Value:          float64(i),
+			ResetTimestamp: 1234567890001,
+		})
 	}
 
 	c := NewTestStorageClient()
@@ -230,7 +260,7 @@ func TestSampleDeliveryOrder(t *testing.T) {
 	defer m.Stop()
 	// These should be received by the client.
 	for _, s := range samples {
-		m.Append(sampleToMetricFamily(s))
+		m.Append(samplesToMetricFamily(s))
 	}
 
 	c.waitForExpectedSamples(t)
@@ -247,7 +277,12 @@ func TestStoreEmptyRequest(t *testing.T) {
 	samples := make([]sample, 0, n)
 	for i := 0; i < n; i++ {
 		name := fmt.Sprintf("test_metric_%d", i)
-		samples = append(samples, sample{Name: name, Labels: map[string]string{}, Value: float64(i)})
+		samples = append(samples, sample{
+			Name:           name,
+			Labels:         map[string]string{},
+			Value:          float64(i),
+			ResetTimestamp: 1234567890000,
+		})
 	}
 
 	c := NewTestStorageClient()
@@ -336,7 +371,12 @@ func TestSpawnNotMoreThanMaxConcurrentSendsGoroutines(t *testing.T) {
 	samples := make([]sample, 0, n)
 	for i := 0; i < n; i++ {
 		name := fmt.Sprintf("test_metric_%d", i)
-		samples = append(samples, sample{Name: name, Labels: map[string]string{}, Value: float64(i)})
+		samples = append(samples, sample{
+			Name:           name,
+			Labels:         map[string]string{},
+			Value:          float64(i),
+			ResetTimestamp: 1234567890000,
+		})
 	}
 
 	c := NewTestBlockedStorageClient()
@@ -353,7 +393,7 @@ func TestSpawnNotMoreThanMaxConcurrentSendsGoroutines(t *testing.T) {
 	}()
 
 	for _, s := range samples {
-		m.Append(sampleToMetricFamily(s))
+		m.Append(samplesToMetricFamily(s))
 	}
 
 	// Wait until the runShard() loops drain the queue.  If things went right, it
@@ -384,33 +424,39 @@ func TestSpawnNotMoreThanMaxConcurrentSendsGoroutines(t *testing.T) {
 	}
 }
 
-func sampleToMetricFamily(s sample) *retrieval.MetricFamily {
-	metricLabels := make([]*dto.LabelPair, 0)
-	metricLabels = append(metricLabels, &dto.LabelPair{
-		Name:  proto.String("_kubernetes_project_id_or_name"),
-		Value: proto.String("1234567890"),
-	})
-	for ln, lv := range s.Labels {
+// All samples must have the same Name.
+func samplesToMetricFamily(samples ...sample) *retrieval.MetricFamily {
+	metrics := make([]*dto.Metric, len(samples))
+	resetTimestamps := make([]int64, len(samples))
+	for i, _ := range samples {
+		if samples[i].Name != samples[0].Name {
+			panic("all metric family names in this call must match")
+		}
+		metricLabels := make([]*dto.LabelPair, 0)
 		metricLabels = append(metricLabels, &dto.LabelPair{
-			Name:  proto.String(ln),
-			Value: proto.String(lv),
+			Name:  proto.String("_kubernetes_project_id_or_name"),
+			Value: proto.String("1234567890"),
 		})
+		for ln, lv := range samples[i].Labels {
+			metricLabels = append(metricLabels, &dto.LabelPair{
+				Name:  proto.String(ln),
+				Value: proto.String(lv),
+			})
+		}
+		metrics[i] = &dto.Metric{
+			Label: metricLabels,
+			Counter: &dto.Counter{
+				Value: proto.Float64(samples[i].Value),
+			},
+		}
+		resetTimestamps[i] = samples[i].ResetTimestamp
 	}
 	return &retrieval.MetricFamily{
 		MetricFamily: &dto.MetricFamily{
-			Name: proto.String(s.Name),
-			Type: dto.MetricType_GAUGE.Enum(),
-			Metric: []*dto.Metric{
-				&dto.Metric{
-					Label: metricLabels,
-					Gauge: &dto.Gauge{
-						Value: proto.Float64(s.Value),
-					},
-				},
-			},
+			Name:   proto.String(samples[0].Name),
+			Type:   dto.MetricType_COUNTER.Enum(),
+			Metric: metrics,
 		},
-		MetricResetTimestampMs: []int64{
-			1234567890000,
-		},
+		MetricResetTimestampMs: resetTimestamps,
 	}
 }
