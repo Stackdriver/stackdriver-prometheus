@@ -32,6 +32,7 @@ import (
 	"github.com/go-kit/kit/log"
 	"github.com/go-kit/kit/log/level"
 	"github.com/prometheus/common/model"
+	"github.com/prometheus/common/version"
 
 	config_util "github.com/prometheus/common/config"
 )
@@ -83,6 +84,9 @@ type recoverableError struct {
 	error
 }
 
+// version.* is populated for 'promu' builds, so this will look broken in unit tests.
+var userAgent = fmt.Sprintf("StackdriverPrometheus/%s", version.Version)
+
 func (c *Client) getConnection(ctx context.Context) (*grpc.ClientConn, error) {
 	if c.conn != nil {
 		return c.conn, nil
@@ -102,6 +106,7 @@ func (c *Client) getConnection(ctx context.Context) (*grpc.ClientConn, error) {
 	dopts := []grpc.DialOption{
 		grpc.WithBalancerName(roundrobin.Name),
 		grpc.WithBlock(), // Wait for the connection to be established before using it.
+		grpc.WithUserAgent(userAgent),
 	}
 	if useAuth {
 		rpcCreds, err := oauth.NewApplicationDefault(context.Background(), MonitoringWriteScope)
