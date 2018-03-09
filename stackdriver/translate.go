@@ -24,7 +24,7 @@ import (
 	"github.com/go-kit/kit/log/level"
 	"github.com/golang/glog"
 	timestamp_pb "github.com/golang/protobuf/ptypes/timestamp"
-	"github.com/jkohen/prometheus/retrieval"
+	"github.com/Stackdriver/stackdriver-prometheus/retrieval"
 	dto "github.com/prometheus/client_model/go"
 	"github.com/prometheus/prometheus/pkg/timestamp"
 	distribution_pb "google.golang.org/genproto/googleapis/api/distribution"

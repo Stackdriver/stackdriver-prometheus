@@ -1,5 +1,5 @@
 repository:
-    path: github.com/jkohen/prometheus
+    path: github.com/Stackdriver/stackdriver-prometheus
 build:
     binaries:
         - name: prometheus

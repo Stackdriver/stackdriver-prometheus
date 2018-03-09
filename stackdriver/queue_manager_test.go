@@ -22,7 +22,7 @@ import (
 	"time"
 
 	"github.com/gogo/protobuf/proto"
-	"github.com/jkohen/prometheus/retrieval"
+	"github.com/Stackdriver/stackdriver-prometheus/retrieval"
 	dto "github.com/prometheus/client_model/go"
 	"github.com/prometheus/common/model"
 	"github.com/prometheus/prometheus/config"

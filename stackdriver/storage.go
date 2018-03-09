@@ -20,7 +20,7 @@ import (
 	"sync"
 
 	"github.com/go-kit/kit/log"
-	"github.com/jkohen/prometheus/retrieval"
+	"github.com/Stackdriver/stackdriver-prometheus/retrieval"
 	config_util "github.com/prometheus/common/config"
 	"github.com/prometheus/common/model"
 	"github.com/prometheus/prometheus/config"

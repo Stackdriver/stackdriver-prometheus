@@ -32,7 +32,7 @@ import (
 
 	"github.com/go-kit/kit/log"
 	"github.com/gogo/protobuf/proto"
-	"github.com/jkohen/prometheus/relabel"
+	"github.com/Stackdriver/stackdriver-prometheus/relabel"
 	dto "github.com/prometheus/client_model/go"
 	"github.com/prometheus/common/model"
 	"github.com/prometheus/prometheus/config"

@@ -26,7 +26,7 @@ import (
 	"github.com/go-kit/kit/log"
 	"github.com/gogo/protobuf/proto"
 	"github.com/golang/protobuf/ptypes/timestamp"
-	"github.com/jkohen/prometheus/retrieval"
+	"github.com/Stackdriver/stackdriver-prometheus/retrieval"
 	dto "github.com/prometheus/client_model/go"
 	"github.com/stretchr/testify/assert"
 	metric_pb "google.golang.org/genproto/googleapis/api/metric"

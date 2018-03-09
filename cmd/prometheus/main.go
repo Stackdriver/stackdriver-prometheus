@@ -38,8 +38,8 @@ import (
 	"github.com/prometheus/common/version"
 	k8s_runtime "k8s.io/apimachinery/pkg/util/runtime"
 
-	"github.com/jkohen/prometheus/retrieval"
-	"github.com/jkohen/prometheus/stackdriver"
+	"github.com/Stackdriver/stackdriver-prometheus/retrieval"
+	"github.com/Stackdriver/stackdriver-prometheus/stackdriver"
 	"github.com/prometheus/common/promlog"
 	promlogflag "github.com/prometheus/common/promlog/flag"
 	"github.com/prometheus/prometheus/config"
