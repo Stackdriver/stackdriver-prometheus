@@ -18,11 +18,11 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Stackdriver/stackdriver-prometheus/relabel"
+	"github.com/Stackdriver/stackdriver-prometheus/retrieval"
 	"github.com/go-kit/kit/log"
 	"github.com/go-kit/kit/log/level"
 	"github.com/gogo/protobuf/proto"
-	"github.com/Stackdriver/stackdriver-prometheus/relabel"
-	"github.com/Stackdriver/stackdriver-prometheus/retrieval"
 	"github.com/prometheus/client_golang/prometheus"
 	dto "github.com/prometheus/client_model/go"
 	"github.com/prometheus/common/model"
@@ -427,11 +427,15 @@ func (s *shards) runShard(i int) {
 	pendingSamples := make([]*retrieval.MetricFamily, 0, s.qm.cfg.MaxSamplesPerSend)
 
 	timer := time.NewTimer(s.qm.cfg.BatchSendDeadline)
-	defer func() {
+	stop := func() {
 		if !timer.Stop() {
-			<-timer.C
+			select {
+			case <-timer.C:
+			default:
+			}
 		}
-	}()
+	}
+	defer stop()
 
 	for {
 		select {
@@ -448,16 +452,11 @@ func (s *shards) runShard(i int) {
 			queueLength.WithLabelValues(s.qm.queueName).Dec()
 			pendingSamples = append(pendingSamples, sample)
 
-			var sentSamples bool
-			for len(pendingSamples) >= s.qm.cfg.MaxSamplesPerSend {
+			if len(pendingSamples) >= s.qm.cfg.MaxSamplesPerSend {
 				s.sendSamples(client, pendingSamples[:s.qm.cfg.MaxSamplesPerSend])
 				pendingSamples = pendingSamples[s.qm.cfg.MaxSamplesPerSend:]
-				sentSamples = true
-			}
-			if sentSamples {
-				if !timer.Stop() {
-					<-timer.C
-				}
+
+				stop()
 				timer.Reset(s.qm.cfg.BatchSendDeadline)
 			}
 		case <-timer.C:

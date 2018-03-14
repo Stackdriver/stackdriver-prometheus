@@ -21,8 +21,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gogo/protobuf/proto"
 	"github.com/Stackdriver/stackdriver-prometheus/retrieval"
+	"github.com/gogo/protobuf/proto"
 	dto "github.com/prometheus/client_model/go"
 	"github.com/prometheus/common/model"
 	"github.com/prometheus/prometheus/config"
@@ -160,6 +160,43 @@ func TestSampleDelivery(t *testing.T) {
 	m.Start()
 	defer m.Stop()
 
+	c.waitForExpectedSamples(t)
+}
+
+func TestSampleDeliveryTimeout(t *testing.T) {
+	// Let's send one less sample than batch size, and wait the timeout duration
+	n := config.DefaultQueueConfig.Capacity - 1
+
+	samples := make([]sample, 0, n)
+	for i := 0; i < n; i++ {
+		name := fmt.Sprintf("test_metric_%d", i)
+		samples = append(samples, sample{
+			Name:           name,
+			Labels:         map[string]string{},
+			Value:          float64(i),
+			ResetTimestamp: 1234567890000,
+		})
+	}
+
+	c := NewTestStorageClient()
+	cfg := config.DefaultQueueConfig
+	cfg.MaxShards = 1
+	cfg.BatchSendDeadline = 100 * time.Millisecond
+	m := NewQueueManager(nil, cfg, nil, nil, c, &DefaultStackdriverConfig)
+	m.Start()
+	defer m.Stop()
+
+	// Send the samples twice, waiting for the samples in the meantime.
+	c.expectSamples(samples)
+	for _, s := range samples {
+		m.Append(samplesToMetricFamily(s))
+	}
+	c.waitForExpectedSamples(t)
+
+	c.expectSamples(samples)
+	for _, s := range samples {
+		m.Append(samplesToMetricFamily(s))
+	}
 	c.waitForExpectedSamples(t)
 }
 
