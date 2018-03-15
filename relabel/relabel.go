@@ -16,6 +16,7 @@ package relabel
 import (
 	"crypto/md5"
 	"fmt"
+	"regexp"
 	"strings"
 
 	"github.com/gogo/protobuf/proto"
@@ -55,28 +56,40 @@ func relabel(input LabelPairs, cfg *config.RelabelConfig) LabelPairs {
 		values = append(values, *lv)
 	}
 	val := strings.Join(values, cfg.Separator)
+	var regex *regexp.Regexp
+	if cfg.Regex.Initialized() {
+		regex = cfg.Regex.Pool.Get().(*regexp.Regexp)
+		if regex == nil {
+			panic(fmt.Sprintf("%v", cfg))
+		}
+	}
+	defer func() {
+		if regex != nil {
+			cfg.Regex.Pool.Put(regex)
+		}
+	}()
 
 	switch cfg.Action {
 	case config.RelabelDrop:
-		if cfg.Regex.MatchString(val) {
+		if regex.MatchString(val) {
 			return nil
 		}
 	case config.RelabelKeep:
-		if !cfg.Regex.MatchString(val) {
+		if !regex.MatchString(val) {
 			return nil
 		}
 	case config.RelabelReplace:
-		indexes := cfg.Regex.FindStringSubmatchIndex(val)
+		indexes := regex.FindStringSubmatchIndex(val)
 		// If there is no match no replacement must take place.
 		if indexes == nil {
 			break
 		}
-		target := string(cfg.Regex.ExpandString([]byte{}, cfg.TargetLabel, val, indexes))
+		target := string(regex.ExpandString([]byte{}, cfg.TargetLabel, val, indexes))
 		if !model.LabelName(target).IsValid() {
 			delete(lmap, cfg.TargetLabel)
 			break
 		}
-		res := cfg.Regex.ExpandString([]byte{}, cfg.Replacement, val, indexes)
+		res := regex.ExpandString([]byte{}, cfg.Replacement, val, indexes)
 		if len(res) == 0 {
 			delete(lmap, cfg.TargetLabel)
 			break
@@ -87,20 +100,20 @@ func relabel(input LabelPairs, cfg *config.RelabelConfig) LabelPairs {
 		lmap[cfg.TargetLabel] = proto.String(fmt.Sprintf("%d", mod))
 	case config.RelabelLabelMap:
 		for _, l := range input {
-			if cfg.Regex.MatchString(*l.Name) {
-				res := cfg.Regex.ReplaceAllString(*l.Name, cfg.Replacement)
+			if regex.MatchString(*l.Name) {
+				res := regex.ReplaceAllString(*l.Name, cfg.Replacement)
 				lmap[res] = l.Value
 			}
 		}
 	case config.RelabelLabelDrop:
 		for _, l := range input {
-			if cfg.Regex.MatchString(*l.Name) {
+			if regex.MatchString(*l.Name) {
 				delete(lmap, *l.Name)
 			}
 		}
 	case config.RelabelLabelKeep:
 		for _, l := range input {
-			if !cfg.Regex.MatchString(*l.Name) {
+			if !regex.MatchString(*l.Name) {
 				delete(lmap, *l.Name)
 			}
 		}

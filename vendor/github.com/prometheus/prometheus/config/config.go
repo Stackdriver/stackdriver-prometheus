@@ -20,6 +20,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	config_util "github.com/prometheus/common/config"
@@ -557,7 +558,7 @@ func (c *RelabelConfig) UnmarshalYAML(unmarshal func(interface{}) error) error {
 	if err := yaml_util.CheckOverflow(c.XXX, "relabel_config"); err != nil {
 		return err
 	}
-	if c.Regex.Regexp == nil {
+	if !c.Regex.Initialized() {
 		c.Regex = MustNewRegexp("")
 	}
 	if c.Modulus == 0 && c.Action == RelabelHashMod {
@@ -588,8 +589,12 @@ func (c *RelabelConfig) UnmarshalYAML(unmarshal func(interface{}) error) error {
 
 // Regexp encapsulates a regexp.Regexp and makes it YAML marshallable.
 type Regexp struct {
-	*regexp.Regexp
+	Pool     sync.Pool
 	original string
+}
+
+func (r *Regexp) Initialized() bool {
+	return len(r.original) != 0
 }
 
 // NewRegexp creates a new anchored Regexp and returns an error if the
@@ -597,7 +602,11 @@ type Regexp struct {
 func NewRegexp(s string) (Regexp, error) {
 	regex, err := regexp.Compile("^(?:" + s + ")$")
 	return Regexp{
-		Regexp:   regex,
+		Pool: sync.Pool{
+			New: func() interface{} {
+				return regex.Copy()
+			},
+		},
 		original: s,
 	}, err
 }
