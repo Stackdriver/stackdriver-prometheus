@@ -17,12 +17,15 @@ package main
 import (
 	"context"
 	"fmt"
+	"net"
 	"net/http"
 	_ "net/http/pprof" // Comment this line to disable pprof endpoint.
+	"net/url"
 	"os"
 	"os/signal"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -35,11 +38,13 @@ import (
 	"github.com/oklog/oklog/pkg/group"
 	"github.com/pkg/errors"
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/common/model"
 	"github.com/prometheus/common/version"
 	k8s_runtime "k8s.io/apimachinery/pkg/util/runtime"
 
 	"github.com/Stackdriver/stackdriver-prometheus/retrieval"
 	"github.com/Stackdriver/stackdriver-prometheus/stackdriver"
+	"github.com/Stackdriver/stackdriver-prometheus/web"
 	"github.com/prometheus/common/promlog"
 	promlogflag "github.com/prometheus/common/promlog/flag"
 	"github.com/prometheus/prometheus/config"
@@ -75,7 +80,10 @@ func main() {
 
 		sdCfg            stackdriver.StackdriverConfig
 		k8sResourceTypes bool
-		listenAddress    string
+		web              web.Options
+		webTimeout       model.Duration
+
+		prometheusURL string
 
 		logLevel promlog.AllowedLevel
 	}{
@@ -96,7 +104,28 @@ func main() {
 		Default("false").BoolVar(&cfg.sdCfg.K8sResourceTypes)
 
 	a.Flag("web.listen-address", "Address to listen on for UI, API, and telemetry.").
-		Default("0.0.0.0:9090").StringVar(&cfg.listenAddress)
+		Default("0.0.0.0:9090").StringVar(&cfg.web.ListenAddress)
+
+	a.Flag("web.read-timeout",
+		"Maximum duration before timing out read of the request, and closing idle connections.").
+		Default("5m").SetValue(&cfg.webTimeout)
+
+	a.Flag("web.max-connections", "Maximum number of simultaneous connections.").
+		Default("512").IntVar(&cfg.web.MaxConnections)
+
+	a.Flag("web.external-url",
+		"The URL under which Prometheus is externally reachable (for example, if Prometheus is served via a reverse proxy). Used for generating relative and absolute links back to Prometheus itself. If the URL has a path portion, it will be used to prefix all HTTP endpoints served by Prometheus. If omitted, relevant URL components will be derived automatically.").
+		PlaceHolder("<URL>").StringVar(&cfg.prometheusURL)
+
+	a.Flag("web.route-prefix",
+		"Prefix for the internal routes of web endpoints. Defaults to path of --web.external-url.").
+		PlaceHolder("<path>").StringVar(&cfg.web.RoutePrefix)
+
+	a.Flag("web.user-assets", "Path to static asset directory, available at /user.").
+		PlaceHolder("<path>").StringVar(&cfg.web.UserAssetsPath)
+
+	a.Flag("web.enable-lifecycle", "Enable shutdown and reload via HTTP request.").
+		Default("false").BoolVar(&cfg.web.EnableLifecycle)
 
 	promlogflag.AddFlags(a, &cfg.logLevel)
 
@@ -106,6 +135,20 @@ func main() {
 		a.Usage(os.Args[1:])
 		os.Exit(2)
 	}
+
+	cfg.web.ExternalURL, err = computeExternalURL(cfg.prometheusURL, cfg.web.ListenAddress)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, errors.Wrapf(err, "parse external URL %q", cfg.prometheusURL))
+		os.Exit(2)
+	}
+
+	cfg.web.ReadTimeout = time.Duration(cfg.webTimeout)
+	// Default -web.route-prefix to path of -web.external-url.
+	if cfg.web.RoutePrefix == "" {
+		cfg.web.RoutePrefix = cfg.web.ExternalURL.Path
+	}
+	// RoutePrefix must always be at least '/'.
+	cfg.web.RoutePrefix = "/" + strings.Trim(cfg.web.RoutePrefix, "/")
 
 	logger := promlog.New(cfg.logLevel)
 
@@ -124,10 +167,39 @@ func main() {
 	level.Info(logger).Log("fd_limits", FdLimits())
 
 	var (
+		ctxWeb, cancelWeb = context.WithCancel(context.Background())
+
 		remoteStorage          = stackdriver.NewStorage(log.With(logger, "component", "remote"), &cfg.sdCfg)
 		discoveryManagerScrape = discovery.NewManager(log.With(logger, "component", "discovery manager scrape"))
 		scrapeManager          = retrieval.NewScrapeManager(log.With(logger, "component", "scrape manager"), remoteStorage)
 	)
+
+	cfg.web.Context = ctxWeb
+	cfg.web.ScrapeManager = scrapeManager
+
+	cfg.web.Version = &web.PrometheusVersion{
+		Version:   version.Version,
+		Revision:  version.Revision,
+		Branch:    version.Branch,
+		BuildUser: version.BuildUser,
+		BuildDate: version.BuildDate,
+		GoVersion: version.GoVersion,
+	}
+
+	cfg.web.Flags = map[string]string{}
+
+	// Exclude kingpin default flags to expose only Prometheus ones.
+	boilerplateFlags := kingpin.New("", "").Version("")
+	for _, f := range a.Model().Flags {
+		if boilerplateFlags.GetFlag(f.Name) != nil {
+			continue
+		}
+
+		cfg.web.Flags[f.Name] = f.Value.String()
+	}
+
+	// Depends on cfg.web.ScrapeManager so needs to be after cfg.web.ScrapeManager = scrapeManager
+	webHandler := web.New(log.With(logger, "component", "web"), &cfg.web)
 
 	// Monitor outgoing connections on default transport with conntrack.
 	http.DefaultTransport.(*http.Transport).DialContext = conntrack.NewDialContextFunc(
@@ -136,6 +208,7 @@ func main() {
 
 	reloaders := []func(cfg *config.Config) error{
 		remoteStorage.ApplyConfig,
+		webHandler.ApplyConfig,
 		scrapeManager.ApplyConfig,
 		func(cfg *config.Config) error {
 			c := make(map[string]sd_config.ServiceDiscoveryConfig)
@@ -148,8 +221,6 @@ func main() {
 
 	prometheus.MustRegister(configSuccess)
 	prometheus.MustRegister(configSuccessTime)
-
-	http.Handle("/metrics", prometheus.Handler())
 
 	// sync.Once is used to make sure we can close the channel at different execution stages(SIGTERM or when the config is loaded).
 	type closeOnce struct {
@@ -179,6 +250,8 @@ func main() {
 				case <-term:
 					level.Warn(logger).Log("msg", "Received SIGTERM, exiting gracefully...")
 					reloadReady.Close()
+				case <-webHandler.Quit():
+					level.Warn(logger).Log("msg", "Received termination request via web service, exiting gracefully...")
 				case <-cancel:
 					reloadReady.Close()
 					break
@@ -236,16 +309,20 @@ func main() {
 		cancel := make(chan struct{})
 		g.Add(
 			func() error {
-				select {
-				case <-reloadReady.C:
-					break
-				}
+				<-reloadReady.C
 
 				for {
 					select {
 					case <-hup:
 						if err := reloadConfig(cfg.configFile, logger, reloaders...); err != nil {
 							level.Error(logger).Log("msg", "Error reloading config", "err", err)
+						}
+					case rc := <-webHandler.Reload():
+						if err := reloadConfig(cfg.configFile, logger, reloaders...); err != nil {
+							level.Error(logger).Log("msg", "Error reloading config", "err", err)
+							rc <- err
+						} else {
+							rc <- nil
 						}
 					case <-cancel:
 						return nil
@@ -267,6 +344,7 @@ func main() {
 				}
 
 				reloadReady.Close()
+				webHandler.Ready()
 				level.Info(logger).Log("msg", "Server is ready to receive requests.")
 				<-cancel
 				return nil
@@ -299,25 +377,18 @@ func main() {
 		)
 	}
 	{
-		cancel := make(chan struct{})
-		server := &http.Server{
-			Addr: cfg.listenAddress,
-		}
 		g.Add(
 			func() error {
-				level.Info(logger).Log("msg", "Web server started")
-				err := server.ListenAndServe()
-				if err != http.ErrServerClosed {
-					return err
+				if err := webHandler.Run(ctxWeb); err != nil {
+					return fmt.Errorf("Error starting web server: %s", err)
 				}
-				<-cancel
 				return nil
 			},
 			func(err error) {
-				if err := server.Shutdown(context.Background()); err != nil {
-					level.Error(logger).Log("msg", "Error stopping web server", "err", err)
-				}
-				close(cancel)
+				// Keep this interrupt before the ruleManager.Stop().
+				// Shutting down the query engine before the rule manager will cause pending queries
+				// to be canceled and ensures a quick shutdown of the rule manager.
+				cancelWeb()
 			},
 		)
 	}
@@ -355,4 +426,42 @@ func reloadConfig(filename string, logger log.Logger, rls ...func(*config.Config
 		return fmt.Errorf("one or more errors occurred while applying the new configuration (--config.file=%s)", filename)
 	}
 	return nil
+}
+
+func startsOrEndsWithQuote(s string) bool {
+	return strings.HasPrefix(s, "\"") || strings.HasPrefix(s, "'") ||
+		strings.HasSuffix(s, "\"") || strings.HasSuffix(s, "'")
+}
+
+// computeExternalURL computes a sanitized external URL from a raw input. It infers unset
+// URL parts from the OS and the given listen address.
+func computeExternalURL(u, listenAddr string) (*url.URL, error) {
+	if u == "" {
+		hostname, err := os.Hostname()
+		if err != nil {
+			return nil, err
+		}
+		_, port, err := net.SplitHostPort(listenAddr)
+		if err != nil {
+			return nil, err
+		}
+		u = fmt.Sprintf("http://%s:%s/", hostname, port)
+	}
+
+	if startsOrEndsWithQuote(u) {
+		return nil, fmt.Errorf("URL must not begin or end with quotes")
+	}
+
+	eu, err := url.Parse(u)
+	if err != nil {
+		return nil, err
+	}
+
+	ppref := strings.TrimRight(eu.Path, "/")
+	if ppref != "" && !strings.HasPrefix(ppref, "/") {
+		ppref = "/" + ppref
+	}
+	eu.Path = ppref
+
+	return eu, nil
 }
