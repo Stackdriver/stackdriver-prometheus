@@ -365,15 +365,29 @@ func (t *QueueManager) reshard(n int) {
 	newShards.start()
 }
 
+type sampleInterval struct {
+	resetTimestamp int64
+	timestamp      int64
+}
+
+// AcceptsInterval returns true if the given interval can be written to
+// Stackdriver after the reference interval. This defines an order for value
+// timestamps with equal reset timestamp, and requires that if the reset
+// timestamp moves, it doesn't overlap with the previous interval.
+func (si *sampleInterval) AcceptsInterval(o sampleInterval) bool {
+	return (o.resetTimestamp == si.resetTimestamp && o.timestamp > si.timestamp) ||
+		(o.resetTimestamp > si.resetTimestamp && o.resetTimestamp >= si.timestamp)
+}
+
 type shard struct {
-	queue               chan *retrieval.MetricFamily
-	youngestSampleTimes map[uint64]int64
+	queue                   chan *retrieval.MetricFamily
+	youngestSampleIntervals map[uint64]sampleInterval
 }
 
 func newShard(cfg config.QueueConfig) shard {
 	return shard{
-		queue:               make(chan *retrieval.MetricFamily, cfg.Capacity),
-		youngestSampleTimes: map[uint64]int64{},
+		queue: make(chan *retrieval.MetricFamily, cfg.Capacity),
+		youngestSampleIntervals: map[uint64]sampleInterval{},
 	}
 }
 
@@ -464,13 +478,15 @@ func (s *shardCollection) runShard(i int) {
 
 			// TODO(jkohen): make sure fingerprint is cached in the sample, as it's not cheap and we already call it in enqueue().
 			fp := sample.Fingerprint()
-			if len(sample.Metric) != 1 {
+			if len(sample.Metric) != 1 || len(sample.MetricResetTimestampMs) != 1 {
 				panic("expected one metric")
 			}
-			sampleTime := sample.Metric[0].GetTimestampMs()
-			// TODO(jkohen): check reset timestamp
-			if youngestSampleTime, ok := shard.youngestSampleTimes[fp]; !ok || youngestSampleTime < sampleTime {
-				shard.youngestSampleTimes[fp] = sampleTime
+			currentSampleInterval := sampleInterval{
+				resetTimestamp: sample.MetricResetTimestampMs[0],
+				timestamp:      sample.Metric[0].GetTimestampMs(),
+			}
+			if youngestSampleInterval, ok := shard.youngestSampleIntervals[fp]; !ok || youngestSampleInterval.AcceptsInterval(currentSampleInterval) {
+				shard.youngestSampleIntervals[fp] = currentSampleInterval
 
 				pendingSamples = append(pendingSamples, sample)
 				if len(pendingSamples) >= s.qm.cfg.MaxSamplesPerSend {

@@ -361,14 +361,24 @@ func TestSampleOutOfOrder(t *testing.T) {
 
 	m.Start()
 	defer m.Stop()
-	// These should be received by the client.
 	for _, s := range samples {
+		// These should be received by the client.
 		m.Append(samplesToMetricFamily(s))
+	}
+	for _, s := range samples {
+		// Same reset and value timestamp should be dropped.
+		m.Append(samplesToMetricFamily(s))
+	}
+	for _, s := range samples {
+		// Same reset timestamp and older value timestamp should be dropped.
 		s.Timestamp -= 1
 		m.Append(samplesToMetricFamily(s))
-		// s.ResetTimestamp -= 1
-		// s.Timestamp += 1000
-		// m.Append(samplesToMetricFamily(s))
+	}
+	for _, s := range samples {
+		// Older reset timestamp should be dropped regardless of value timestamp.
+		s.ResetTimestamp -= 1
+		s.Timestamp += 1000
+		m.Append(samplesToMetricFamily(s))
 	}
 
 	c.waitForExpectedSamples(t)
