@@ -157,7 +157,7 @@ type QueueManager struct {
 	resourceMappings []ResourceMap
 
 	shardsMtx   sync.RWMutex
-	shards      *shards
+	shards      *shardCollection
 	numShards   int
 	reshardChan chan int
 	quit        chan struct{}
@@ -196,7 +196,7 @@ func NewQueueManager(logger log.Logger, cfg config.QueueConfig, externalLabelSet
 
 		samplesIn: newEWMARate(ewmaWeight, shardUpdateDuration),
 	}
-	t.shards = t.newShards(t.numShards)
+	t.shards = t.newShardCollection(t.numShards)
 	numShards.WithLabelValues(t.queueName).Set(float64(t.numShards))
 	queueCapacity.WithLabelValues(t.queueName).Set(float64(t.cfg.Capacity))
 
@@ -352,7 +352,7 @@ func (t *QueueManager) reshard(n int) {
 	numShards.WithLabelValues(t.queueName).Set(float64(n))
 
 	t.shardsMtx.Lock()
-	newShards := t.newShards(n)
+	newShards := t.newShardCollection(n)
 	oldShards := t.shards
 	t.shards = newShards
 	t.shardsMtx.Unlock()
@@ -365,61 +365,73 @@ func (t *QueueManager) reshard(n int) {
 	newShards.start()
 }
 
-type shards struct {
+type shard struct {
+	queue               chan *retrieval.MetricFamily
+	youngestSampleTimes map[uint64]int64
+}
+
+func newShard(cfg config.QueueConfig) shard {
+	return shard{
+		queue:               make(chan *retrieval.MetricFamily, cfg.Capacity),
+		youngestSampleTimes: map[uint64]int64{},
+	}
+}
+
+type shardCollection struct {
 	qm         *QueueManager
 	client     StorageClient
 	translator *Translator
-	queues     []chan *retrieval.MetricFamily
+	shards     []shard
 	done       chan struct{}
 	wg         sync.WaitGroup
 }
 
-func (t *QueueManager) newShards(numShards int) *shards {
-	queues := make([]chan *retrieval.MetricFamily, numShards)
+func (t *QueueManager) newShardCollection(numShards int) *shardCollection {
+	shards := make([]shard, numShards)
 	for i := 0; i < numShards; i++ {
-		queues[i] = make(chan *retrieval.MetricFamily, t.cfg.Capacity)
+		shards[i] = newShard(t.cfg)
 	}
-	s := &shards{
+	s := &shardCollection{
 		qm:         t,
 		translator: NewTranslator(t.logger, metricsPrefix, t.resourceMappings),
-		queues:     queues,
+		shards:     shards,
 		done:       make(chan struct{}),
 	}
 	s.wg.Add(numShards)
 	return s
 }
 
-func (s *shards) len() int {
-	return len(s.queues)
+func (s *shardCollection) len() int {
+	return len(s.shards)
 }
 
-func (s *shards) start() {
-	for i := 0; i < len(s.queues); i++ {
+func (s *shardCollection) start() {
+	for i := 0; i < len(s.shards); i++ {
 		go s.runShard(i)
 	}
 }
 
-func (s *shards) stop() {
-	for _, shard := range s.queues {
-		close(shard)
+func (s *shardCollection) stop() {
+	for _, shard := range s.shards {
+		close(shard.queue)
 	}
 	s.wg.Wait()
 	level.Debug(s.qm.logger).Log("msg", "Stopped resharding")
 }
 
-func (s *shards) enqueue(sample *retrieval.MetricFamily) {
+func (s *shardCollection) enqueue(sample *retrieval.MetricFamily) {
 	s.qm.samplesIn.incr(1)
 
 	fp := sample.Fingerprint()
-	shard := fp % uint64(len(s.queues))
-	s.queues[shard] <- sample
+	shardIndex := fp % uint64(len(s.shards))
+	s.shards[shardIndex].queue <- sample
 }
 
-func (s *shards) runShard(i int) {
+func (s *shardCollection) runShard(i int) {
 	defer s.wg.Done()
 	client := s.qm.clientFactory.New()
 	defer client.Close()
-	queue := s.queues[i]
+	shard := s.shards[i]
 
 	// Send batches of at most MaxSamplesPerSend samples to the remote storage.
 	// If we have fewer samples than that, flush them out after a deadline
@@ -439,7 +451,7 @@ func (s *shards) runShard(i int) {
 
 	for {
 		select {
-		case sample, ok := <-queue:
+		case sample, ok := <-shard.queue:
 			if !ok {
 				if len(pendingSamples) > 0 {
 					level.Debug(s.qm.logger).Log("msg", "Flushing samples to remote storage...", "count", len(pendingSamples))
@@ -448,16 +460,26 @@ func (s *shards) runShard(i int) {
 				}
 				return
 			}
-
 			queueLength.WithLabelValues(s.qm.queueName).Dec()
-			pendingSamples = append(pendingSamples, sample)
 
-			if len(pendingSamples) >= s.qm.cfg.MaxSamplesPerSend {
-				s.sendSamples(client, pendingSamples[:s.qm.cfg.MaxSamplesPerSend])
-				pendingSamples = pendingSamples[s.qm.cfg.MaxSamplesPerSend:]
+			// TODO(jkohen): make sure fingerprint is cached in the sample, as it's not cheap and we already call it in enqueue().
+			fp := sample.Fingerprint()
+			if len(sample.Metric) != 1 {
+				panic("expected one metric")
+			}
+			sampleTime := sample.Metric[0].GetTimestampMs()
+			// TODO(jkohen): check reset timestamp
+			if youngestSampleTime, ok := shard.youngestSampleTimes[fp]; !ok || youngestSampleTime < sampleTime {
+				shard.youngestSampleTimes[fp] = sampleTime
 
-				stop()
-				timer.Reset(s.qm.cfg.BatchSendDeadline)
+				pendingSamples = append(pendingSamples, sample)
+				if len(pendingSamples) >= s.qm.cfg.MaxSamplesPerSend {
+					s.sendSamples(client, pendingSamples[:s.qm.cfg.MaxSamplesPerSend])
+					pendingSamples = pendingSamples[s.qm.cfg.MaxSamplesPerSend:]
+
+					stop()
+					timer.Reset(s.qm.cfg.BatchSendDeadline)
+				}
 			}
 		case <-timer.C:
 			if len(pendingSamples) > 0 {
@@ -470,7 +492,7 @@ func (s *shards) runShard(i int) {
 }
 
 // sendSamples to the remote storage with backoff for recoverable errors.
-func (s *shards) sendSamples(client StorageClient, samples []*retrieval.MetricFamily) {
+func (s *shardCollection) sendSamples(client StorageClient, samples []*retrieval.MetricFamily) {
 	req := s.translator.ToCreateTimeSeriesRequest(samples)
 	backoff := s.qm.cfg.MinBackoff
 	for retries := s.qm.cfg.MaxRetries; retries > 0; retries-- {

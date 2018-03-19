@@ -41,6 +41,7 @@ type sample struct {
 	Labels         map[string]string
 	Value          float64
 	ResetTimestamp int64
+	Timestamp      int64
 }
 
 func init() {
@@ -103,11 +104,14 @@ func (c *TestStorageClient) Store(req *monitoring.CreateTimeSeriesRequest) error
 			if startTime != nil {
 				resetTimeMs = time.Unix(startTime.Seconds, int64(startTime.Nanos)).UnixNano() / 1000000
 			}
+			endTime := point.GetInterval().GetEndTime()
+			endTimeMs := time.Unix(endTime.Seconds, int64(endTime.Nanos)).UnixNano() / 1000000
 			s := sample{
 				Name:           name,
 				Labels:         ts.Metric.Labels,
 				Value:          point.Value.GetDoubleValue(),
 				ResetTimestamp: resetTimeMs,
+				Timestamp:      endTimeMs,
 			}
 			c.receivedSamples[name] = append(c.receivedSamples[name], s)
 		}
@@ -142,6 +146,7 @@ func TestSampleDelivery(t *testing.T) {
 			Labels:         map[string]string{},
 			Value:          float64(i),
 			ResetTimestamp: 1234567890000,
+			Timestamp:      2234567890000,
 		})
 	}
 
@@ -165,7 +170,7 @@ func TestSampleDelivery(t *testing.T) {
 
 func TestSampleDeliveryTimeout(t *testing.T) {
 	// Let's send one less sample than batch size, and wait the timeout duration
-	n := config.DefaultQueueConfig.Capacity - 1
+	n := config.DefaultQueueConfig.MaxSamplesPerSend - 1
 
 	samples := make([]sample, 0, n)
 	for i := 0; i < n; i++ {
@@ -175,6 +180,7 @@ func TestSampleDeliveryTimeout(t *testing.T) {
 			Labels:         map[string]string{},
 			Value:          float64(i),
 			ResetTimestamp: 1234567890000,
+			Timestamp:      2234567890000,
 		})
 	}
 
@@ -193,6 +199,9 @@ func TestSampleDeliveryTimeout(t *testing.T) {
 	}
 	c.waitForExpectedSamples(t)
 
+	for i := range samples {
+		samples[i].Timestamp += 1
+	}
 	c.expectSamples(samples)
 	for _, s := range samples {
 		m.Append(samplesToMetricFamily(s))
@@ -209,34 +218,60 @@ func TestRelabel(t *testing.T) {
 	for i := 0; i < n-1; i++ {
 		name := fmt.Sprintf("test_metric_%d", i)
 		samples = append(samples,
-			sample{Name: name, Labels: map[string]string{
-				"drop_label": "x",
-			}, Value: float64(i), ResetTimestamp: 1234567890000})
+			sample{
+				Name: name, Labels: map[string]string{
+					"drop_label": "x",
+				},
+				Value:          float64(i),
+				ResetTimestamp: 1234567890000,
+				Timestamp:      2234567890000,
+			})
 		expectedSamples = append(expectedSamples,
-			sample{Name: name, Labels: map[string]string{
-				"external_1": "a",
-				"external_2": "b",
-			}, Value: float64(i), ResetTimestamp: 1234567890000})
+			sample{
+				Name: name, Labels: map[string]string{
+					"external_1": "a",
+					"external_2": "b",
+				},
+				Value:          float64(i),
+				ResetTimestamp: 1234567890000,
+				Timestamp:      2234567890000,
+			})
 	}
 	i := n - 1
 	// Ensure that the metrics and reset timestamps stay synchronized after
 	// dropping metrics from the family.
 	multiMetricSamples := []sample{
-		{Name: "multi_metric",
+		{
+			Name: "multi_metric",
 			Labels: map[string]string{
 				"drop_metric": "true",
-			}, Value: float64(i), ResetTimestamp: 1234567890000},
-		{Name: "multi_metric",
+			},
+			Value:          float64(i),
+			ResetTimestamp: 1234567890000,
+			Timestamp:      2234567890000,
+		},
+		{
+			Name: "multi_metric",
 			Labels: map[string]string{
 				"keep_metric": "true",
-			}, Value: float64(i), ResetTimestamp: 1234567890001},
+			},
+			Value:          float64(i),
+			ResetTimestamp: 1234567890001,
+			Timestamp:      2234567890001,
+		},
 	}
 	expectedSamples = append(expectedSamples,
-		sample{Name: "multi_metric", Labels: map[string]string{
-			"keep_metric": "true",
-			"external_1":  "a",
-			"external_2":  "b",
-		}, Value: float64(i), ResetTimestamp: 1234567890001})
+		sample{
+			Name: "multi_metric",
+			Labels: map[string]string{
+				"keep_metric": "true",
+				"external_1":  "a",
+				"external_2":  "b",
+			},
+			Value:          float64(i),
+			ResetTimestamp: 1234567890001,
+			Timestamp:      2234567890001,
+		})
 
 	c := NewTestStorageClient()
 	if len(expectedSamples) != config.DefaultQueueConfig.MaxSamplesPerSend {
@@ -286,6 +321,7 @@ func TestSampleDeliveryOrder(t *testing.T) {
 			Labels:         map[string]string{},
 			Value:          float64(i),
 			ResetTimestamp: 1234567890001,
+			Timestamp:      1234567890001 + int64(i),
 		})
 	}
 
@@ -298,6 +334,41 @@ func TestSampleDeliveryOrder(t *testing.T) {
 	// These should be received by the client.
 	for _, s := range samples {
 		m.Append(samplesToMetricFamily(s))
+	}
+
+	c.waitForExpectedSamples(t)
+}
+
+func TestSampleOutOfOrder(t *testing.T) {
+	n := config.DefaultQueueConfig.MaxSamplesPerSend
+
+	samples := make([]sample, 0, n)
+	for i := 0; i < n; i++ {
+		samples = append(samples, sample{
+			Name: "test_metric",
+			Labels: map[string]string{
+				"key": fmt.Sprintf("%d", i),
+			},
+			Value:          float64(i),
+			ResetTimestamp: 1234567890001,
+			Timestamp:      2234567890001,
+		})
+	}
+
+	c := NewTestStorageClient()
+	c.expectSamples(samples)
+	m := NewQueueManager(nil, config.DefaultQueueConfig, nil, nil, c, &DefaultStackdriverConfig)
+
+	m.Start()
+	defer m.Stop()
+	// These should be received by the client.
+	for _, s := range samples {
+		m.Append(samplesToMetricFamily(s))
+		s.Timestamp -= 1
+		m.Append(samplesToMetricFamily(s))
+		// s.ResetTimestamp -= 1
+		// s.Timestamp += 1000
+		// m.Append(samplesToMetricFamily(s))
 	}
 
 	c.waitForExpectedSamples(t)
@@ -319,6 +390,7 @@ func TestStoreEmptyRequest(t *testing.T) {
 			Labels:         map[string]string{},
 			Value:          float64(i),
 			ResetTimestamp: 1234567890000,
+			Timestamp:      2234567890000,
 		})
 	}
 
@@ -392,8 +464,8 @@ func (t *QueueManager) queueLen() int {
 	t.shardsMtx.Lock()
 	defer t.shardsMtx.Unlock()
 	queueLength := 0
-	for _, shard := range t.shards.queues {
-		queueLength += len(shard)
+	for _, shard := range t.shards.shards {
+		queueLength += len(shard.queue)
 	}
 	return queueLength
 }
@@ -413,6 +485,7 @@ func TestSpawnNotMoreThanMaxConcurrentSendsGoroutines(t *testing.T) {
 			Labels:         map[string]string{},
 			Value:          float64(i),
 			ResetTimestamp: 1234567890000,
+			Timestamp:      2234567890000,
 		})
 	}
 
@@ -485,6 +558,7 @@ func samplesToMetricFamily(samples ...sample) *retrieval.MetricFamily {
 			Counter: &dto.Counter{
 				Value: proto.Float64(samples[i].Value),
 			},
+			TimestampMs: proto.Int64(samples[i].Timestamp),
 		}
 		resetTimestamps[i] = samples[i].ResetTimestamp
 	}
