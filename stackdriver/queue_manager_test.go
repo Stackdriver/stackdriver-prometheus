@@ -15,7 +15,9 @@ package stackdriver
 
 import (
 	"fmt"
+	"hash/fnv"
 	"reflect"
+	"sort"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -26,6 +28,7 @@ import (
 	dto "github.com/prometheus/client_model/go"
 	"github.com/prometheus/common/model"
 	"github.com/prometheus/prometheus/config"
+	metric_pb "google.golang.org/genproto/googleapis/api/metric"
 	monitoring "google.golang.org/genproto/googleapis/monitoring/v3"
 )
 
@@ -34,6 +37,7 @@ type TestStorageClient struct {
 	expectedSamples map[string][]sample
 	wg              sync.WaitGroup
 	mtx             sync.Mutex
+	t               *testing.T
 }
 
 type sample struct {
@@ -57,10 +61,11 @@ func init() {
 	}
 }
 
-func NewTestStorageClient() *TestStorageClient {
+func NewTestStorageClient(t *testing.T) *TestStorageClient {
 	return &TestStorageClient{
 		receivedSamples: map[string][]sample{},
 		expectedSamples: map[string][]sample{},
+		t:               t,
 	}
 }
 
@@ -89,11 +94,37 @@ func (c *TestStorageClient) waitForExpectedSamples(t *testing.T) {
 	}
 }
 
+func fingerprintMetric(metric *metric_pb.Metric) uint64 {
+	const SeparatorByte byte = 255
+	h := fnv.New64a()
+	h.Write([]byte(metric.GetType()))
+	// Sort the labels to get a deterministic fingerprint.
+	var keys []string
+	for k := range metric.GetLabels() {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		v := metric.GetLabels()[k]
+		h.Write([]byte{SeparatorByte})
+		h.Write([]byte(k))
+		h.Write([]byte{SeparatorByte})
+		h.Write([]byte(v))
+	}
+	return h.Sum64()
+}
+
 func (c *TestStorageClient) Store(req *monitoring.CreateTimeSeriesRequest) error {
 	c.mtx.Lock()
 	defer c.mtx.Unlock()
+	seenTimeSeries := map[uint64]struct{}{}
 	count := 0
 	for _, ts := range req.TimeSeries {
+		fp := fingerprintMetric(ts.Metric)
+		if _, ok := seenTimeSeries[fp]; ok {
+			c.t.Errorf("found duplicate time series in request: %v", ts)
+		}
+		seenTimeSeries[fp] = struct{}{}
 		metricType := ts.Metric.Type
 		// Remove the Stackdriver "domain/" prefix which isn't present in the test input.
 		name := metricType[len(metricsPrefix)+1:]
@@ -150,7 +181,7 @@ func TestSampleDelivery(t *testing.T) {
 		})
 	}
 
-	c := NewTestStorageClient()
+	c := NewTestStorageClient(t)
 	c.expectSamples(samples)
 
 	cfg := config.DefaultQueueConfig
@@ -184,7 +215,7 @@ func TestSampleDeliveryTimeout(t *testing.T) {
 		})
 	}
 
-	c := NewTestStorageClient()
+	c := NewTestStorageClient(t)
 	cfg := config.DefaultQueueConfig
 	cfg.MaxShards = 1
 	cfg.BatchSendDeadline = 100 * time.Millisecond
@@ -199,6 +230,8 @@ func TestSampleDeliveryTimeout(t *testing.T) {
 	}
 	c.waitForExpectedSamples(t)
 
+	c.receivedSamples = map[string][]sample{}
+	c.expectedSamples = map[string][]sample{}
 	for i := range samples {
 		samples[i].Timestamp += 1
 	}
@@ -273,7 +306,7 @@ func TestRelabel(t *testing.T) {
 			Timestamp:      2234567890001,
 		})
 
-	c := NewTestStorageClient()
+	c := NewTestStorageClient(t)
 	if len(expectedSamples) != config.DefaultQueueConfig.MaxSamplesPerSend {
 		// These should be equal, or the test will block waiting for the batch timeout.
 		t.Fatal("bug in test")
@@ -325,7 +358,7 @@ func TestSampleDeliveryOrder(t *testing.T) {
 		})
 	}
 
-	c := NewTestStorageClient()
+	c := NewTestStorageClient(t)
 	c.expectSamples(samples)
 	m := NewQueueManager(nil, config.DefaultQueueConfig, nil, nil, c, &DefaultStackdriverConfig)
 
@@ -355,7 +388,7 @@ func TestSampleOutOfOrder(t *testing.T) {
 		})
 	}
 
-	c := NewTestStorageClient()
+	c := NewTestStorageClient(t)
 	c.expectSamples(samples)
 	m := NewQueueManager(nil, config.DefaultQueueConfig, nil, nil, c, &DefaultStackdriverConfig)
 
@@ -404,7 +437,7 @@ func TestStoreEmptyRequest(t *testing.T) {
 		})
 	}
 
-	c := NewTestStorageClient()
+	c := NewTestStorageClient(t)
 	m := NewQueueManager(nil, config.DefaultQueueConfig, nil, nil, c, &DefaultStackdriverConfig)
 
 	// These should be received by the client.

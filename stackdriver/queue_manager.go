@@ -451,6 +451,12 @@ func (s *shardCollection) runShard(i int) {
 	// If we have fewer samples than that, flush them out after a deadline
 	// anyways.
 	pendingSamples := make([]*retrieval.MetricFamily, 0, s.qm.cfg.MaxSamplesPerSend)
+	// Fingerprint of time series contained in pendingSamples. Gets reset
+	// whenever samples are extracted from pendingSamples.
+	newSeenSamples := func() map[uint64]struct{} {
+		return make(map[uint64]struct{}, s.qm.cfg.MaxSamplesPerSend)
+	}
+	seenSamples := newSeenSamples()
 
 	timer := time.NewTimer(s.qm.cfg.BatchSendDeadline)
 	stop := func() {
@@ -476,7 +482,14 @@ func (s *shardCollection) runShard(i int) {
 			}
 			queueLength.WithLabelValues(s.qm.queueName).Dec()
 
-			// TODO(jkohen): make sure fingerprint is cached in the sample, as it's not cheap and we already call it in enqueue().
+			// Stackdriver rejects requests with points out of order
+			// or with multiple points for the same time series. The
+			// check below reduces the likelihood that this will
+			// happen by keeping track of the youngest interval
+			// written for each time series by the current
+			// shard. Each shard builds requests for a disjoint set
+			// of time series, so we don't need to track the
+			// intervals across shards.
 			fp := sample.Fingerprint()
 			if len(sample.Metric) != 1 || len(sample.MetricResetTimestampMs) != 1 {
 				panic("expected one metric")
@@ -488,19 +501,34 @@ func (s *shardCollection) runShard(i int) {
 			if youngestSampleInterval, ok := shard.youngestSampleIntervals[fp]; !ok || youngestSampleInterval.AcceptsInterval(currentSampleInterval) {
 				shard.youngestSampleIntervals[fp] = currentSampleInterval
 
-				pendingSamples = append(pendingSamples, sample)
-				if len(pendingSamples) >= s.qm.cfg.MaxSamplesPerSend {
-					s.sendSamples(client, pendingSamples[:s.qm.cfg.MaxSamplesPerSend])
-					pendingSamples = pendingSamples[s.qm.cfg.MaxSamplesPerSend:]
+				// If pendingSamples contains a point for the
+				// incoming time series, send all pending points
+				// to Stackdriver, and start a new list. This
+				// prevents adding two points for the same time
+				// series to a single request, which Stackdriver
+				// rejects.
+				_, seen := seenSamples[fp]
+				if !seen {
+					pendingSamples = append(pendingSamples, sample)
+				}
+				if len(pendingSamples) >= s.qm.cfg.MaxSamplesPerSend || seen {
+					s.sendSamples(client, pendingSamples)
+					pendingSamples = pendingSamples[:0]
+					seenSamples = newSeenSamples()
 
 					stop()
 					timer.Reset(s.qm.cfg.BatchSendDeadline)
 				}
+				if seen {
+					pendingSamples = append(pendingSamples, sample)
+				}
+				seenSamples[fp] = struct{}{}
 			}
 		case <-timer.C:
 			if len(pendingSamples) > 0 {
 				s.sendSamples(client, pendingSamples)
 				pendingSamples = pendingSamples[:0]
+				seenSamples = newSeenSamples()
 			}
 			timer.Reset(s.qm.cfg.BatchSendDeadline)
 		}
