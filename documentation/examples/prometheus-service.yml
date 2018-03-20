@@ -43,11 +43,9 @@ items:
         serviceAccountName: prometheus
         containers:
         - name: prometheus
-          image: gcr.io/prometheus-to-sd/stackdriver-prometheus:master
+          image: gcr.io/stackdriver-prometheus/stackdriver-prometheus:release-0.3.0
           # Uncomment this to enable k8s_* resource types. Requires a Stackdriver whitelist.
           #args: ["--config.file=/etc/prometheus/prometheus.yml", "--stackdriver.k8s-resource-types"]
-          # Helps during development, when reusing the tag.
-          imagePullPolicy: Always
           ports:
           - name: web
             containerPort: 9090
@@ -65,9 +63,9 @@ items:
       # Source: https://github.com/stackdriver/prometheus/blob/master/documentation/examples/prometheus.yml
       global:
         external_labels:
-          _kubernetes_cluster_name: 'prom-test-cluster-2'
+          _kubernetes_cluster_name: 'my-cluster'
           _kubernetes_location: 'us-central1-a'
-          _kubernetes_project_id_or_name: 'prometheus-to-sd'
+          _kubernetes_project_id_or_name: 'my-gcp-project'
 
       # Scrape config for nodes (kubelet).
       #
