@@ -225,6 +225,7 @@ func (t *QueueManager) Append(metricFamily *retrieval.MetricFamily) error {
 			"reset_ts", len(metricFamily.MetricResetTimestampMs))
 	}
 
+	queueLength.WithLabelValues(t.queueName).Add(float64(len(metricFamily.Metric)))
 	t.shardsMtx.RLock()
 	for i := range metricFamily.Metric {
 		metricFamilySlice := &retrieval.MetricFamily{
@@ -239,8 +240,6 @@ func (t *QueueManager) Append(metricFamily *retrieval.MetricFamily) error {
 		t.shards.enqueue(metricFamilySlice)
 	}
 	t.shardsMtx.RUnlock()
-
-	queueLength.WithLabelValues(t.queueName).Inc()
 	return nil
 }
 
