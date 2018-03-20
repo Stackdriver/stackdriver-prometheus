@@ -7,5 +7,6 @@ Updating the sample deployment configuration (`documentation/examples/prometheus
 1.  Update the version tag in the Docker image to the version you released.
 1.  Apply it to your cluster to verify it works. E.g. `kubectl -f apply prometheus-service.yml`.
 1.  Upload it to the public documentation repo: `gsutil cp documentation/examples/prometheus-service.yml gs://stackdriver-prometheus-documentation/`
+1.  If `rbac-setup.yml` has changed since the last release, also upload it to the same repo.
 
 This should be improved over time to include continuous integration.
