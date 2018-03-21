@@ -20,11 +20,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Stackdriver/stackdriver-prometheus/retrieval"
 	"github.com/go-kit/kit/log"
 	"github.com/go-kit/kit/log/level"
 	"github.com/golang/glog"
 	timestamp_pb "github.com/golang/protobuf/ptypes/timestamp"
-	"github.com/Stackdriver/stackdriver-prometheus/retrieval"
 	dto "github.com/prometheus/client_model/go"
 	"github.com/prometheus/prometheus/pkg/timestamp"
 	distribution_pb "google.golang.org/genproto/googleapis/api/distribution"
@@ -33,11 +33,12 @@ import (
 	monitoring_pb "google.golang.org/genproto/googleapis/monitoring/v3"
 )
 
-var supportedMetricTypes = map[dto.MetricType]bool{
-	dto.MetricType_COUNTER:   true,
-	dto.MetricType_GAUGE:     true,
-	dto.MetricType_HISTOGRAM: true,
-	dto.MetricType_SUMMARY:   true,
+var supportedMetricTypes = map[dto.MetricType]struct{}{
+	dto.MetricType_COUNTER:   struct{}{},
+	dto.MetricType_GAUGE:     struct{}{},
+	dto.MetricType_HISTOGRAM: struct{}{},
+	dto.MetricType_SUMMARY:   struct{}{},
+	dto.MetricType_UNTYPED:   struct{}{},
 }
 
 const (
@@ -145,7 +146,7 @@ func getTimestamp(ts time.Time) *timestamp_pb.Timestamp {
 	}
 }
 
-// assumes that mType is Counter, Gauge or Histogram. Returns nil on error.
+// assumes that mType is Counter, Gauge, Untyped, or Histogram. Returns nil on error.
 func (t *Translator) translateOne(name string,
 	mType dto.MetricType,
 	metric *dto.Metric,
@@ -185,7 +186,7 @@ func (t *Translator) translateOne(name string,
 	}, nil
 }
 
-// assumes that mType is Counter, Gauge or Histogram. Returns nil on error.
+// assumes that mType is Counter, Gauge, Untyped, or Histogram. Returns nil on error.
 func (t *Translator) translateSummary(name string,
 	metric *dto.Metric,
 	start time.Time) ([]*monitoring_pb.TimeSeries, error) {
@@ -291,6 +292,8 @@ func setValue(
 				DistributionValue: convertToDistributionValue(metric.GetHistogram()),
 			},
 		}
+	case dto.MetricType_UNTYPED:
+		setValueBaseOnSimpleType(metric.GetUntyped().GetValue(), valueType, point)
 	}
 }
 

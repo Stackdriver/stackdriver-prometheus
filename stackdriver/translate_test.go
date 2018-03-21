@@ -23,10 +23,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Stackdriver/stackdriver-prometheus/retrieval"
 	"github.com/go-kit/kit/log"
 	"github.com/gogo/protobuf/proto"
 	"github.com/golang/protobuf/ptypes/timestamp"
-	"github.com/Stackdriver/stackdriver-prometheus/retrieval"
 	dto "github.com/prometheus/client_model/go"
 	"github.com/stretchr/testify/assert"
 	metric_pb "google.golang.org/genproto/googleapis/api/metric"
@@ -36,6 +36,7 @@ var metricTypeGauge = dto.MetricType_GAUGE
 var metricTypeCounter = dto.MetricType_COUNTER
 var metricTypeHistogram = dto.MetricType_HISTOGRAM
 var metricTypeSummary = dto.MetricType_SUMMARY
+var metricTypeUntyped = dto.MetricType_UNTYPED
 
 var testMetricName = "test_name"
 var gaugeMetricName = "gauge_metric"
@@ -45,6 +46,7 @@ var testMetricSummary = "test_summary"
 var testMetricDescription = "Description 1"
 var testMetricHistogramDescription = "Description 2"
 var testMetricSummaryDescription = "Description 3"
+var untypedMetricName = "untyped_metric"
 
 var testResourceMappings = []ResourceMap{
 	{
@@ -214,6 +216,21 @@ var metrics = []*retrieval.MetricFamily{
 			1234567890432,
 		},
 	},
+	{
+		MetricFamily: &dto.MetricFamily{
+			Name: proto.String(untypedMetricName),
+			Type: &metricTypeUntyped,
+			Metric: []*dto.Metric{
+				{
+					Untyped:     &dto.Untyped{Value: proto.Float64(3.0)},
+					TimestampMs: proto.Int64(1234568000432),
+				},
+			},
+		},
+		MetricResetTimestampMs: []int64{
+			1234567890432,
+		},
+	},
 }
 
 func TestToCreateTimeSeriesRequest(t *testing.T) {
@@ -228,7 +245,7 @@ func TestToCreateTimeSeriesRequest(t *testing.T) {
 	}
 
 	ts := request.TimeSeries
-	assert.Equal(t, 11, len(ts))
+	assert.Equal(t, 12, len(ts))
 
 	// First two counter values.
 	for i := 0; i <= 1; i++ {
@@ -358,6 +375,15 @@ func TestToCreateTimeSeriesRequest(t *testing.T) {
 		}
 		assert.Equal(t, &timestamp.Timestamp{Seconds: 1234568000, Nanos: 432000000}, metric.Points[0].Interval.EndTime)
 	}
+
+	metric = ts[11]
+	assert.Equal(t, "gke_container", metric.Resource.Type)
+	assert.Equal(t, "metrics.prefix/untyped_metric", metric.Metric.Type)
+	assert.Equal(t, metric_pb.MetricDescriptor_DOUBLE, metric.ValueType)
+	assert.Equal(t, metric_pb.MetricDescriptor_GAUGE, metric.MetricKind)
+
+	assert.Equal(t, float64(3.0), metric.Points[0].Value.GetDoubleValue())
+	assert.Equal(t, &timestamp.Timestamp{Seconds: 1234568000, Nanos: 432000000}, metric.Points[0].Interval.EndTime)
 }
 
 func TestUnknownMonitoredResource(t *testing.T) {
