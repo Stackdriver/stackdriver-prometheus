@@ -509,6 +509,7 @@ func (s *shardCollection) runShard(i int) {
 				_, seen := seenSamples[fp]
 				if !seen {
 					pendingSamples = append(pendingSamples, sample)
+					seenSamples[fp] = struct{}{}
 				}
 				if len(pendingSamples) >= s.qm.cfg.MaxSamplesPerSend || seen {
 					s.sendSamples(client, pendingSamples)
@@ -520,8 +521,8 @@ func (s *shardCollection) runShard(i int) {
 				}
 				if seen {
 					pendingSamples = append(pendingSamples, sample)
+					seenSamples[fp] = struct{}{}
 				}
-				seenSamples[fp] = struct{}{}
 			}
 		case <-timer.C:
 			if len(pendingSamples) > 0 {
