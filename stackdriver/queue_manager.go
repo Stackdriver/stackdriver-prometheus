@@ -367,16 +367,20 @@ func (t *QueueManager) reshard(n int) {
 	// Stackdriver, causing the time series to get stuck.  This could be
 	// avoided by aligning reset timestamps across all shards, e.g. using
 	// DELTA metrics instead of CUMULATIVE.
+	oldShards.stop() // the old shards must be stopped before we poke at their internals
+	// This is a critical section, and growing the map on a large deployment
+	// is slow, so preallocate the map to be near the expected size.
+	for newShardIndex := range newShards.shards {
+		newShards.shards[newShardIndex].youngestSampleIntervals = make(map[uint64]sampleInterval, len(oldShards.shards[0].youngestSampleIntervals))
+	}
 	newShardsModulo := uint64(len(newShards.shards))
-	for oldShardIndex, _ := range oldShards.shards {
+	for oldShardIndex := range oldShards.shards {
 		for k, v := range oldShards.shards[oldShardIndex].youngestSampleIntervals {
 			newShardIndex := k % newShardsModulo
 			newShards.shards[newShardIndex].youngestSampleIntervals[k] = v
 		}
 	}
 	t.shardsMtx.Unlock()
-
-	oldShards.stop()
 
 	// We start the newShards after we have stopped (the therefore completely
 	// flushed) the oldShards, to guarantee we only every deliver samples in
@@ -439,7 +443,7 @@ func (s *shardCollection) len() int {
 }
 
 func (s *shardCollection) start() {
-	for i, _ := range s.shards {
+	for i := range s.shards {
 		go s.runShard(i)
 	}
 }
