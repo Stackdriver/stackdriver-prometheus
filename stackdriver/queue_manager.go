@@ -354,6 +354,26 @@ func (t *QueueManager) reshard(n int) {
 	newShards := t.newShardCollection(n)
 	oldShards := t.shards
 	t.shards = newShards
+
+	// Carry over the map of youngest samples to the new shards.
+	//
+	// Reset timestamps are determined in the scraper, and in case multiple
+	// scrapers collect the same time series (e.g. overlapping scrape
+	// configs), cumulative samples from different scrapers are likely to
+	// have overlapping intervals. Normally this map guarantees
+	// non-overlapping intervals in the output, but if after resharding the
+	// map gets initialized with an earlier reset timestamp, the overlapping
+	// intervals will prevent the right samples from making it to
+	// Stackdriver, causing the time series to get stuck.  This could be
+	// avoided by aligning reset timestamps across all shards, e.g. using
+	// DELTA metrics instead of CUMULATIVE.
+	newShardsModulo := uint64(len(newShards.shards))
+	for oldShardIndex, _ := range oldShards.shards {
+		for k, v := range oldShards.shards[oldShardIndex].youngestSampleIntervals {
+			newShardIndex := k % newShardsModulo
+			newShards.shards[newShardIndex].youngestSampleIntervals[k] = v
+		}
+	}
 	t.shardsMtx.Unlock()
 
 	oldShards.stop()
@@ -419,7 +439,7 @@ func (s *shardCollection) len() int {
 }
 
 func (s *shardCollection) start() {
-	for i := 0; i < len(s.shards); i++ {
+	for i, _ := range s.shards {
 		go s.runShard(i)
 	}
 }

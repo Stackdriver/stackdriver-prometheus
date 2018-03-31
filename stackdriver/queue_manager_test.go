@@ -94,6 +94,11 @@ func (c *TestStorageClient) waitForExpectedSamples(t *testing.T) {
 	}
 }
 
+func (c *TestStorageClient) resetExpectedSamples() {
+	c.receivedSamples = map[string][]sample{}
+	c.expectedSamples = map[string][]sample{}
+}
+
 func fingerprintMetric(metric *metric_pb.Metric) uint64 {
 	const SeparatorByte byte = 255
 	h := fnv.New64a()
@@ -201,8 +206,7 @@ func TestSampleDelivery(t *testing.T) {
 
 func TestSampleDeliveryMultiShard(t *testing.T) {
 	numShards := 10
-	samplesPerSend := 5
-	n := samplesPerSend * numShards
+	n := 5 * numShards
 
 	samples := make([]sample, 0, n)
 	for i := 0; i < n; i++ {
@@ -267,8 +271,7 @@ func TestSampleDeliveryTimeout(t *testing.T) {
 	}
 	c.waitForExpectedSamples(t)
 
-	c.receivedSamples = map[string][]sample{}
-	c.expectedSamples = map[string][]sample{}
+	c.resetExpectedSamples()
 	for i := range samples {
 		samples[i].Timestamp += 1
 	}
@@ -451,6 +454,53 @@ func TestSampleOutOfOrder(t *testing.T) {
 		m.Append(samplesToMetricFamily(s))
 	}
 
+	c.waitForExpectedSamples(t)
+}
+
+// TestSampleOutOfOrderMultiShard is a specialized version of
+// TestSampleOutOfOrder that checks that out-of-order samples can be detected
+// after resharding. TestSampleOutOfOrder does a more exhaustive test of the
+// logic that detects out-of-order samples in general.
+func TestSampleOutOfOrderMultiShard(t *testing.T) {
+	numShards := 10
+	n := 100 * numShards
+
+	samples := make([]sample, 0, n)
+	for i := 0; i < n; i++ {
+		samples = append(samples, sample{
+			Name: "test_metric",
+			Labels: map[string]string{
+				"key": fmt.Sprintf("%d", i),
+			},
+			Value:          float64(i),
+			ResetTimestamp: 1234567890001,
+			Timestamp:      2234567890001,
+		})
+	}
+
+	c := NewTestStorageClient(t)
+
+	cfg := config.DefaultQueueConfig
+	// flush after each sample, to avoid blocking the test
+	cfg.MaxSamplesPerSend = 1
+	cfg.MaxShards = numShards
+	m := NewQueueManager(nil, config.DefaultQueueConfig, nil, nil, c, &DefaultStackdriverConfig)
+	m.Start()
+	defer m.Stop()
+
+	c.expectSamples(samples)
+	for _, s := range samples {
+		// These should be received by the client.
+		m.Append(samplesToMetricFamily(s))
+	}
+	c.waitForExpectedSamples(t)
+
+	c.resetExpectedSamples()
+	m.reshard(numShards)        // blocks until resharded
+	c.expectSamples([]sample{}) // all samples should be dropped
+	for _, s := range samples {
+		m.Append(samplesToMetricFamily(s))
+	}
 	c.waitForExpectedSamples(t)
 }
 
