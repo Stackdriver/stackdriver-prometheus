@@ -199,6 +199,43 @@ func TestSampleDelivery(t *testing.T) {
 	c.waitForExpectedSamples(t)
 }
 
+func TestSampleDeliveryMultiShard(t *testing.T) {
+	numShards := 10
+	samplesPerSend := 5
+	n := samplesPerSend * numShards
+
+	samples := make([]sample, 0, n)
+	for i := 0; i < n; i++ {
+		name := fmt.Sprintf("test_metric_%d", i)
+		samples = append(samples, sample{
+			Name:           name,
+			Labels:         map[string]string{},
+			Value:          float64(i),
+			ResetTimestamp: 1234567890000,
+			Timestamp:      2234567890000,
+		})
+	}
+
+	c := NewTestStorageClient(t)
+
+	cfg := config.DefaultQueueConfig
+	// flush after each sample, to avoid blocking the test
+	cfg.MaxSamplesPerSend = 1
+	cfg.MaxShards = numShards
+	m := NewQueueManager(nil, cfg, nil, nil, c, &DefaultStackdriverConfig)
+	m.Start()
+	defer m.Stop()
+	m.reshard(numShards) // blocks until resharded
+
+	c.expectSamples(samples)
+	// These should be received by the client.
+	for _, s := range samples {
+		m.Append(samplesToMetricFamily(s))
+	}
+
+	c.waitForExpectedSamples(t)
+}
+
 func TestSampleDeliveryTimeout(t *testing.T) {
 	// Let's send one less sample than batch size, and wait the timeout duration
 	n := config.DefaultQueueConfig.MaxSamplesPerSend - 1
