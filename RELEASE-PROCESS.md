@@ -1,4 +1,5 @@
-1.  Create a git branch for the version, e.g. `release-0.2`, and update file `VERSION` with the numeric version, e.g. `0.2`.
+1.  Update file `VERSION` with the numeric version, e.g. `0.3.1`.
+1.  Create a git branch for the version, e.g. `release-0.3.1`.
 1.  Update `DOCKER_IMAGE_NAME` in `Makefile` to use the public docker repo. The value is provided and commented out.
 1.  Run `make push`.
 
