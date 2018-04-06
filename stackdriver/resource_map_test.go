@@ -33,28 +33,24 @@ func TestTranslate(t *testing.T) {
 		},
 	}
 	// This metric is missing label "kube1".
-	noMatchMetric := dto.Metric{
-		Label: []*dto.LabelPair{
-			makeLabelPair("ignored", "a"),
-			makeLabelPair("kube2", "b"),
-		},
+	noMatchMetric := []*dto.LabelPair{
+		makeLabelPair("ignored", "a"),
+		makeLabelPair("kube2", "b"),
 	}
-	if labels := r.Translate(&noMatchMetric); labels != nil {
+	if labels := r.Translate(noMatchMetric); labels != nil {
 		t.Errorf("Expected no match, matched %v", labels)
 	}
-	matchMetric := dto.Metric{
-		Label: []*dto.LabelPair{
-			makeLabelPair("ignored", "a"),
-			makeLabelPair("kube2", "b"),
-			makeLabelPair("kube1", "c"),
-		},
+	matchMetric := []*dto.LabelPair{
+		makeLabelPair("ignored", "a"),
+		makeLabelPair("kube2", "b"),
+		makeLabelPair("kube1", "c"),
 	}
 
 	expectedLabels := map[string]string{
 		"sd1": "c",
 		"sd2": "b",
 	}
-	if labels := r.Translate(&matchMetric); labels == nil {
+	if labels := r.Translate(matchMetric); labels == nil {
 		t.Errorf("Expected %v, actual nil", expectedLabels)
 	} else if !reflect.DeepEqual(labels, expectedLabels) {
 		t.Errorf("Expected %v, actual %v", expectedLabels, labels)
@@ -79,21 +75,19 @@ func BenchmarkTranslate(b *testing.B) {
 			"_kubernetes_pod_container_name": "container_name",
 		},
 	}
-	metric := dto.Metric{
-		Label: []*dto.LabelPair{
-			makeLabelPair(ProjectIdLabel, "1:anoeuh oeusoeh uasoeuh"),
-			makeLabelPair("_kubernetes_location", "2:anoeuh oeusoeh uasoeuh"),
-			makeLabelPair("_kubernetes_cluster_name", "3:anoeuh oeusoeh uasoeuh"),
-			makeLabelPair("_kubernetes_namespace", "4:anoeuh oeusoeh uasoeuh"),
-			makeLabelPair("_kubernetes_pod_name", "5:anoeuh oeusoeh uasoeuh"),
-			makeLabelPair("_kubernetes_pod_node_name", "6:anoeuh oeusoeh uasoeuh"),
-			makeLabelPair("_kubernetes_pod_container_name", "7:anoeuh oeusoeh uasoeuh"),
-			makeLabelPair("ignored", "8:anoeuh oeusoeh uasoeuh"),
-		},
+	metricLabels := []*dto.LabelPair{
+		makeLabelPair(ProjectIdLabel, "1:anoeuh oeusoeh uasoeuh"),
+		makeLabelPair("_kubernetes_location", "2:anoeuh oeusoeh uasoeuh"),
+		makeLabelPair("_kubernetes_cluster_name", "3:anoeuh oeusoeh uasoeuh"),
+		makeLabelPair("_kubernetes_namespace", "4:anoeuh oeusoeh uasoeuh"),
+		makeLabelPair("_kubernetes_pod_name", "5:anoeuh oeusoeh uasoeuh"),
+		makeLabelPair("_kubernetes_pod_node_name", "6:anoeuh oeusoeh uasoeuh"),
+		makeLabelPair("_kubernetes_pod_container_name", "7:anoeuh oeusoeh uasoeuh"),
+		makeLabelPair("ignored", "8:anoeuh oeusoeh uasoeuh"),
 	}
 
 	for i := 0; i < b.N; i++ {
-		if labels := r.Translate(&metric); labels == nil {
+		if labels := r.Translate(metricLabels); labels == nil {
 			b.Fail()
 		}
 	}

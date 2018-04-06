@@ -151,7 +151,7 @@ func (t *Translator) translateOne(name string,
 	mType dto.MetricType,
 	metric *dto.Metric,
 	start time.Time) (*monitoring_pb.TimeSeries, error) {
-	monitoredResource := t.getMonitoredResource(metric)
+	monitoredResource := t.getMonitoredResource(metric.GetLabel())
 	if monitoredResource == nil {
 		return nil, errors.New("cannot extract Stackdriver monitored resource from metric")
 	}
@@ -190,7 +190,7 @@ func (t *Translator) translateOne(name string,
 func (t *Translator) translateSummary(name string,
 	metric *dto.Metric,
 	start time.Time) ([]*monitoring_pb.TimeSeries, error) {
-	monitoredResource := t.getMonitoredResource(metric)
+	monitoredResource := t.getMonitoredResource(metric.GetLabel())
 	if monitoredResource == nil {
 		return nil, errors.New("cannot extract Stackdriver monitored resource from metric")
 	}
@@ -384,9 +384,9 @@ func extractValueType(mType dto.MetricType) metric_pb.MetricDescriptor_ValueType
 	return metric_pb.MetricDescriptor_DOUBLE
 }
 
-func (t *Translator) getMonitoredResource(metric *dto.Metric) *monitoredres_pb.MonitoredResource {
+func (t *Translator) getMonitoredResource(metricLabels []*dto.LabelPair) *monitoredres_pb.MonitoredResource {
 	for _, resource := range t.resourceMappings {
-		if labels := resource.Translate(metric); labels != nil {
+		if labels := resource.Translate(metricLabels); labels != nil {
 			return &monitoredres_pb.MonitoredResource{
 				Type:   resource.Type,
 				Labels: labels,

@@ -82,9 +82,9 @@ type ResourceMap struct {
 	LabelMap map[string]string
 }
 
-func (m *ResourceMap) Translate(metric *dto.Metric) map[string]string {
+func (m *ResourceMap) Translate(labels []*dto.LabelPair) map[string]string {
 	stackdriverLabels := make(map[string]string, len(m.LabelMap))
-	for _, label := range metric.GetLabel() {
+	for _, label := range labels {
 		if stackdriverName, ok := m.LabelMap[label.GetName()]; ok {
 			stackdriverLabels[stackdriverName] = label.GetValue()
 		}
