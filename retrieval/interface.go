@@ -20,7 +20,6 @@ import (
 	"fmt"
 	"sort"
 
-	"github.com/gogo/protobuf/proto"
 	dto "github.com/prometheus/client_model/go"
 )
 
@@ -42,16 +41,7 @@ type MetricFamily struct {
 	// MetricFamily.Metric. Elements must be initialized to NoTimestamp if
 	// the value is unknown.
 	MetricResetTimestampMs []int64
-}
-
-// Clone returns a new object that is a deep copy of the target object.
-func (f *MetricFamily) Clone() (o *MetricFamily) {
-	o = &MetricFamily{
-		MetricFamily:           proto.Clone(f.MetricFamily).(*dto.MetricFamily),
-		MetricResetTimestampMs: make([]int64, len(f.MetricResetTimestampMs)),
-	}
-	o.MetricResetTimestampMs = f.MetricResetTimestampMs
-	return
+	//	TargetLabels           labels.Labels
 }
 
 func (f *MetricFamily) String() string {
