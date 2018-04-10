@@ -88,7 +88,7 @@ docker: build
 
 push: test docker
 	@echo ">> pushing docker image"
-	gcloud docker -- push "$(DOCKER_IMAGE_NAME):$(DOCKER_IMAGE_TAG)"
+	docker push "$(DOCKER_IMAGE_NAME):$(DOCKER_IMAGE_TAG)"
 
 assets:
 	@echo ">> writing assets"
