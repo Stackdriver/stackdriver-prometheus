@@ -18,6 +18,7 @@ package stackdriver
 
 import (
 	dto "github.com/prometheus/client_model/go"
+	"github.com/prometheus/prometheus/pkg/labels"
 )
 
 const (
@@ -82,8 +83,13 @@ type ResourceMap struct {
 	LabelMap map[string]string
 }
 
-func (m *ResourceMap) Translate(labels []*dto.LabelPair) map[string]string {
+func (m *ResourceMap) Translate(targetLabels labels.Labels, labels []*dto.LabelPair) map[string]string {
 	stackdriverLabels := make(map[string]string, len(m.LabelMap))
+	for i := range targetLabels {
+		if stackdriverName, ok := m.LabelMap[targetLabels[i].Name]; ok {
+			stackdriverLabels[stackdriverName] = targetLabels[i].Value
+		}
+	}
 	for _, label := range labels {
 		if stackdriverName, ok := m.LabelMap[label.GetName()]; ok {
 			stackdriverLabels[stackdriverName] = label.GetValue()

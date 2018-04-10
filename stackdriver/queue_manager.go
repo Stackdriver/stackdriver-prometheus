@@ -236,6 +236,7 @@ func (t *QueueManager) Append(metricFamily *retrieval.MetricFamily) error {
 				Metric: metricFamily.Metric[i : i+1],
 			},
 			MetricResetTimestampMs: metricFamily.MetricResetTimestampMs[i : i+1],
+			TargetLabels:           metricFamily.TargetLabels,
 		}
 		t.shards.enqueue(metricFamilySlice)
 	}

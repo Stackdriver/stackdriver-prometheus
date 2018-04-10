@@ -13,7 +13,6 @@ limitations under the License.
 package stackdriver
 
 import (
-	"errors"
 	"fmt"
 	"math"
 	"strconv"
@@ -26,6 +25,7 @@ import (
 	"github.com/golang/glog"
 	timestamp_pb "github.com/golang/protobuf/ptypes/timestamp"
 	dto "github.com/prometheus/client_model/go"
+	"github.com/prometheus/prometheus/pkg/labels"
 	"github.com/prometheus/prometheus/pkg/timestamp"
 	distribution_pb "google.golang.org/genproto/googleapis/api/distribution"
 	metric_pb "google.golang.org/genproto/googleapis/api/metric"
@@ -104,8 +104,18 @@ func (t *Translator) translateFamily(family *retrieval.MetricFamily) ([]*monitor
 	tss := make([]*monitoring_pb.TimeSeries, 0, len(family.GetMetric()))
 	for i, metric := range family.GetMetric() {
 		startTime := timestamp.Time(family.MetricResetTimestampMs[i])
-		if family.GetType() == dto.MetricType_SUMMARY {
-			ts, err := t.translateSummary(family.GetName(), metric, startTime)
+		monitoredResource := t.getMonitoredResource(family.TargetLabels, metric.GetLabel())
+		if monitoredResource == nil {
+			// Metrics are usually independent, so just drop this one.
+			level.Warn(t.logger).Log(
+				"msg", "cannot extract Stackdriver monitored resource from metric",
+				"family", family.GetName(),
+				"metric", metric)
+			continue
+		}
+		switch family.GetType() {
+		case dto.MetricType_SUMMARY:
+			ts, err := t.translateSummary(family.GetName(), monitoredResource, metric, startTime)
 			if err != nil {
 				// Metrics are usually independent, so just drop this one.
 				level.Warn(t.logger).Log(
@@ -116,8 +126,8 @@ func (t *Translator) translateFamily(family *retrieval.MetricFamily) ([]*monitor
 				continue
 			}
 			tss = append(tss, ts...)
-		} else {
-			ts, err := t.translateOne(family.GetName(), family.GetType(), metric, startTime)
+		default:
+			ts, err := t.translateOne(family.GetName(), monitoredResource, family.GetType(), metric, startTime)
 			if err != nil {
 				// Metrics are usually independent, so just drop this one.
 				level.Warn(t.logger).Log(
@@ -148,13 +158,10 @@ func getTimestamp(ts time.Time) *timestamp_pb.Timestamp {
 
 // assumes that mType is Counter, Gauge, Untyped, or Histogram. Returns nil on error.
 func (t *Translator) translateOne(name string,
+	monitoredResource *monitoredres_pb.MonitoredResource,
 	mType dto.MetricType,
 	metric *dto.Metric,
 	start time.Time) (*monitoring_pb.TimeSeries, error) {
-	monitoredResource := t.getMonitoredResource(metric.GetLabel())
-	if monitoredResource == nil {
-		return nil, errors.New("cannot extract Stackdriver monitored resource from metric")
-	}
 	interval := &monitoring_pb.TimeInterval{
 		EndTime: getTimestamp(timestamp.Time(metric.GetTimestampMs()).UTC()),
 	}
@@ -188,12 +195,9 @@ func (t *Translator) translateOne(name string,
 
 // assumes that mType is Counter, Gauge, Untyped, or Histogram. Returns nil on error.
 func (t *Translator) translateSummary(name string,
+	monitoredResource *monitoredres_pb.MonitoredResource,
 	metric *dto.Metric,
 	start time.Time) ([]*monitoring_pb.TimeSeries, error) {
-	monitoredResource := t.getMonitoredResource(metric.GetLabel())
-	if monitoredResource == nil {
-		return nil, errors.New("cannot extract Stackdriver monitored resource from metric")
-	}
 	interval := &monitoring_pb.TimeInterval{
 		EndTime: getTimestamp(timestamp.Time(metric.GetTimestampMs()).UTC()),
 	}
@@ -384,9 +388,10 @@ func extractValueType(mType dto.MetricType) metric_pb.MetricDescriptor_ValueType
 	return metric_pb.MetricDescriptor_DOUBLE
 }
 
-func (t *Translator) getMonitoredResource(metricLabels []*dto.LabelPair) *monitoredres_pb.MonitoredResource {
+func (t *Translator) getMonitoredResource(
+	targetLabels labels.Labels, metricLabels []*dto.LabelPair) *monitoredres_pb.MonitoredResource {
 	for _, resource := range t.resourceMappings {
-		if labels := resource.Translate(metricLabels); labels != nil {
+		if labels := resource.Translate(targetLabels, metricLabels); labels != nil {
 			return &monitoredres_pb.MonitoredResource{
 				Type:   resource.Type,
 				Labels: labels,

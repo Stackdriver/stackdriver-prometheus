@@ -28,6 +28,7 @@ import (
 	dto "github.com/prometheus/client_model/go"
 	"github.com/prometheus/common/model"
 	"github.com/prometheus/prometheus/config"
+	"github.com/prometheus/prometheus/pkg/labels"
 	metric_pb "google.golang.org/genproto/googleapis/api/metric"
 	monitoring "google.golang.org/genproto/googleapis/monitoring/v3"
 )
@@ -48,6 +49,10 @@ type sample struct {
 	Timestamp      int64
 }
 
+var (
+	TestTargetLabel = labels.Label{Name: "__target_label", Value: "1234"}
+)
+
 func init() {
 	// Override the default resource mappings, so they only require the
 	// project id resource label, which makes the tests more concise.
@@ -55,7 +60,8 @@ func init() {
 		{
 			Type: "global",
 			LabelMap: map[string]string{
-				ProjectIdLabel: "project_id",
+				ProjectIdLabel:       "project_id",
+				TestTargetLabel.Name: TestTargetLabel.Value,
 			},
 		},
 	}
@@ -540,6 +546,7 @@ func TestStoreEmptyRequest(t *testing.T) {
 			MetricResetTimestampMs: []int64{
 				1234567890000,
 			},
+			TargetLabels: labels.Labels{TestTargetLabel},
 		})
 	}
 	m.Start()
@@ -699,5 +706,6 @@ func samplesToMetricFamily(samples ...sample) *retrieval.MetricFamily {
 			Metric: metrics,
 		},
 		MetricResetTimestampMs: resetTimestamps,
+		TargetLabels:           labels.Labels{TestTargetLabel},
 	}
 }
