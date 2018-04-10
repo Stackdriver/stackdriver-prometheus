@@ -24,10 +24,10 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Stackdriver/stackdriver-prometheus/relabel"
 	"github.com/go-kit/kit/log"
 	"github.com/go-kit/kit/log/level"
 	"github.com/gogo/protobuf/proto"
-	"github.com/Stackdriver/stackdriver-prometheus/relabel"
 	"github.com/prometheus/client_golang/prometheus"
 	dto "github.com/prometheus/client_model/go"
 	"github.com/prometheus/common/expfmt"
@@ -171,6 +171,7 @@ func newScrapePool(cfg *config.ScrapeConfig, app Appendable, logger log.Logger) 
 			t,
 			log.With(logger, "target", t),
 			buffers,
+			t.DiscoveredLabels(),
 			func(l relabel.LabelPairs) relabel.LabelPairs { return sp.mutateSampleLabels(l, targetLabelMap) },
 			func(l relabel.LabelPairs) relabel.LabelPairs { return sp.mutateReportSampleLabels(l, targetLabelMap) },
 			sp.appender,
@@ -491,6 +492,7 @@ type scrapeLoop struct {
 	l              log.Logger
 	lastScrapeSize int
 	buffers        *pool.BytesPool
+	targetLabels   labels.Labels
 
 	appender            func() Appender
 	sampleMutator       labelsMutator
@@ -507,6 +509,7 @@ func newScrapeLoop(ctx context.Context,
 	resetPointMap resetPointMapper,
 	l log.Logger,
 	buffers *pool.BytesPool,
+	targetLabels labels.Labels,
 	sampleMutator labelsMutator,
 	reportSampleMutator labelsMutator,
 	appender func() Appender,
@@ -521,6 +524,7 @@ func newScrapeLoop(ctx context.Context,
 		scraper:             sc,
 		resetPointMap:       resetPointMap,
 		buffers:             buffers,
+		targetLabels:        targetLabels,
 		appender:            appender,
 		sampleMutator:       sampleMutator,
 		reportSampleMutator: reportSampleMutator,
@@ -678,7 +682,7 @@ loop:
 		if len(metricFamily.Metric) == 0 {
 			continue
 		}
-		err = app.Add(&MetricFamily{metricFamily, resetTimes})
+		err = app.Add(&MetricFamily{metricFamily, resetTimes, sl.targetLabels})
 		switch err {
 		case nil:
 		case ErrOutOfOrderSample:
@@ -786,7 +790,7 @@ func (sl *scrapeLoop) addReportSample(app Appender, name string, t int64, v floa
 			},
 		},
 	}
-	err := app.Add(&MetricFamily{metricFamily, []int64{NoTimestamp}})
+	err := app.Add(&MetricFamily{metricFamily, []int64{NoTimestamp}, sl.targetLabels})
 	switch err {
 	case nil:
 		return nil

@@ -21,6 +21,7 @@ import (
 	"sort"
 
 	dto "github.com/prometheus/client_model/go"
+	"github.com/prometheus/prometheus/pkg/labels"
 )
 
 // The errors exposed.
@@ -41,12 +42,13 @@ type MetricFamily struct {
 	// MetricFamily.Metric. Elements must be initialized to NoTimestamp if
 	// the value is unknown.
 	MetricResetTimestampMs []int64
-	//	TargetLabels           labels.Labels
+	// see Target.DiscoveredLabels()
+	TargetLabels labels.Labels
 }
 
 func (f *MetricFamily) String() string {
-	return fmt.Sprintf("MetricFamily<dto.MetricFamily: %v MetricResetTimestampMs: %v>",
-		f.MetricFamily, f.MetricResetTimestampMs)
+	return fmt.Sprintf("MetricFamily<dto.MetricFamily: %v MetricResetTimestampMs: %v TargetLabels: %v>",
+		f.MetricFamily, f.MetricResetTimestampMs, f.TargetLabels)
 }
 
 // SeparatorByte is a byte that cannot occur in valid UTF-8 sequences and is
@@ -54,16 +56,30 @@ func (f *MetricFamily) String() string {
 // when calculating their combined hash value (aka signature aka fingerprint).
 const SeparatorByte byte = 255
 
-// ByName implements sort.Interface for []*MetricFamily based on the Name field.
+// LabelPairsByName implements sort.Interface for []*MetricFamily based on the Name field.
 type LabelPairsByName []*dto.LabelPair
 
 func (f LabelPairsByName) Len() int           { return len(f) }
 func (f LabelPairsByName) Swap(i, j int)      { f[i], f[j] = f[j], f[i] }
 func (f LabelPairsByName) Less(i, j int) bool { return f[i].GetName() < f[j].GetName() }
 
+// LabelsByName implements sort.Interface for labels.Labels.
+type LabelsByName labels.Labels
+
+func (f LabelsByName) Len() int           { return len(f) }
+func (f LabelsByName) Swap(i, j int)      { f[i], f[j] = f[j], f[i] }
+func (f LabelsByName) Less(i, j int) bool { return f[i].Name < f[j].Name }
+
 func (f *MetricFamily) Fingerprint() uint64 {
 	h := hashNew()
 	h = hashAdd(h, f.GetName())
+	sort.Sort(LabelsByName(f.TargetLabels))
+	for i := range f.TargetLabels {
+		h = hashAddByte(h, SeparatorByte)
+		h = hashAdd(h, f.TargetLabels[i].Name)
+		h = hashAddByte(h, SeparatorByte)
+		h = hashAdd(h, f.TargetLabels[i].Value)
+	}
 	for _, metric := range f.GetMetric() {
 		sort.Sort(LabelPairsByName(metric.GetLabel()))
 		for _, label := range metric.GetLabel() {

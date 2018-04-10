@@ -30,9 +30,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Stackdriver/stackdriver-prometheus/relabel"
 	"github.com/go-kit/kit/log"
 	"github.com/gogo/protobuf/proto"
-	"github.com/Stackdriver/stackdriver-prometheus/relabel"
 	dto "github.com/prometheus/client_model/go"
 	"github.com/prometheus/common/model"
 	"github.com/prometheus/prometheus/config"
@@ -410,7 +410,7 @@ func TestScrapeLoopStopBeforeRun(t *testing.T) {
 
 	sl := newScrapeLoop(context.Background(),
 		scraper, &fakeResetPointMap{},
-		nil, nil,
+		nil, nil, labels.Labels{},
 		nopMutator,
 		nopMutator,
 		nil,
@@ -472,7 +472,7 @@ func TestScrapeLoopStop(t *testing.T) {
 
 	sl := newScrapeLoop(context.Background(),
 		scraper, &fakeResetPointMap{},
-		nil, nil,
+		nil, nil, labels.Labels{},
 		nopMutator,
 		nopMutator,
 		app,
@@ -532,7 +532,7 @@ func TestScrapeLoopRun(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	sl := newScrapeLoop(ctx,
 		scraper, &fakeResetPointMap{},
-		nil, nil,
+		nil, nil, labels.Labels{},
 		nopMutator,
 		nopMutator,
 		app,
@@ -576,7 +576,7 @@ func TestScrapeLoopRun(t *testing.T) {
 	ctx, cancel = context.WithCancel(context.Background())
 	sl = newScrapeLoop(ctx,
 		scraper, &fakeResetPointMap{},
-		nil, nil,
+		nil, nil, labels.Labels{},
 		nopMutator,
 		nopMutator,
 		app,
@@ -615,9 +615,10 @@ func TestScrapeLoopRun(t *testing.T) {
 func TestScrapeLoopAppend(t *testing.T) {
 	app := &collectResultAppender{}
 
+	targetLabels := labels.Labels{{Name: "foo", Value: "bar"}}
 	sl := newScrapeLoop(context.Background(),
 		nil, &fakeResetPointMap{},
-		nil, nil,
+		nil, nil, targetLabels,
 		nopMutator,
 		nopMutator,
 		func() Appender { return app },
@@ -640,6 +641,9 @@ func TestScrapeLoopAppend(t *testing.T) {
 		untypedFromTriplet("metric_a", timestamp.FromTime(now), 1),
 		untypedFromTriplet("metric_b", timestamp.FromTime(now), 42),
 	}
+	for i := range want {
+		want[i].TargetLabels = targetLabels
+	}
 	sort.Sort(ByName(want))
 	if !reflect.DeepEqual(want, result) {
 		t.Fatalf("Appended samples not as expected.\nWanted: %+v\nGot:    %+v", want, result)
@@ -651,7 +655,7 @@ func TestScrapeLoopMutator(t *testing.T) {
 
 	sl := newScrapeLoop(context.Background(),
 		nil, &fakeResetPointMap{},
-		nil, nil,
+		nil, nil, labels.Labels{},
 		func(input relabel.LabelPairs) relabel.LabelPairs {
 			output := relabel.LabelPairs{}
 			for _, label := range input {
@@ -688,7 +692,7 @@ func TestScrapeLoopMutatorDeletesMetric(t *testing.T) {
 
 	sl := newScrapeLoop(context.Background(),
 		nil, &fakeResetPointMap{},
-		nil, nil,
+		nil, nil, labels.Labels{},
 		func(lset relabel.LabelPairs) relabel.LabelPairs {
 			var lb relabel.LabelPairs
 			for _, label := range lset {
@@ -755,6 +759,7 @@ func TestScrapeLoopMutatorDeletesMetric(t *testing.T) {
 				NoTimestamp,
 				NoTimestamp,
 			},
+			TargetLabels: labels.Labels{},
 		},
 	}
 	sort.Sort(ByName(want))
@@ -769,7 +774,7 @@ func TestScrapeLoopAppendSampleLimit(t *testing.T) {
 
 	sl := newScrapeLoop(context.Background(),
 		nil, &fakeResetPointMap{},
-		nil, nil,
+		nil, nil, labels.Labels{},
 		nopMutator,
 		nopMutator,
 		func() Appender { return app },
@@ -816,7 +821,7 @@ func TestScrapeLoopAppendNoStalenessIfTimestamp(t *testing.T) {
 	app := &collectResultAppender{}
 	sl := newScrapeLoop(context.Background(),
 		nil, &fakeResetPointMap{},
-		nil, nil,
+		nil, nil, labels.Labels{},
 		nopMutator,
 		nopMutator,
 		func() Appender { return app },
@@ -851,7 +856,7 @@ func TestScrapeLoopRunReportsTargetDownOnScrapeError(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	sl := newScrapeLoop(ctx,
 		scraper, &fakeResetPointMap{},
-		nil, nil,
+		nil, nil, labels.Labels{},
 		nopMutator,
 		nopMutator,
 		app,
@@ -886,7 +891,7 @@ func TestScrapeLoopRunReportsTargetDownOnInvalidUTF8(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	sl := newScrapeLoop(ctx,
 		scraper, &fakeResetPointMap{},
-		nil, nil,
+		nil, nil, labels.Labels{},
 		nopMutator,
 		nopMutator,
 		app,
@@ -934,7 +939,7 @@ func TestScrapeLoopAppendGracefullyIfAmendOrOutOfOrderOrOutOfBounds(t *testing.T
 
 	sl := newScrapeLoop(context.Background(),
 		nil, &fakeResetPointMap{},
-		nil, nil,
+		nil, nil, labels.Labels{},
 		nopMutator,
 		nopMutator,
 		func() Appender { return app },
@@ -962,7 +967,7 @@ func TestScrapeLoopOutOfBoundsTimeError(t *testing.T) {
 	app := &collectResultAppender{}
 	sl := newScrapeLoop(context.Background(),
 		nil, &fakeResetPointMap{},
-		nil, nil,
+		nil, nil, labels.Labels{},
 		nopMutator,
 		nopMutator,
 		func() Appender {
@@ -995,7 +1000,7 @@ func TestPointExtractor(t *testing.T) {
 	resetPointMap := newSimpleResetPointMap()
 	sl := newScrapeLoop(context.Background(),
 		nil, &resetPointMap,
-		nil, nil,
+		nil, nil, labels.Labels{},
 		nopMutator,
 		nopMutator,
 		func() Appender { return app },
@@ -1248,6 +1253,7 @@ func untypedFromTriplet(name string, t int64, v float64) *MetricFamily {
 		MetricResetTimestampMs: []int64{
 			NoTimestamp,
 		},
+		TargetLabels: labels.Labels{},
 	}
 }
 
@@ -1268,6 +1274,7 @@ func counterFromComponents(name string, t int64, reset int64, v float64) *Metric
 		MetricResetTimestampMs: []int64{
 			reset,
 		},
+		TargetLabels: labels.Labels{},
 	}
 }
 
@@ -1299,6 +1306,7 @@ func histogramFromComponents(name string, t int64, reset int64, c1, c2 uint64, s
 		MetricResetTimestampMs: []int64{
 			reset,
 		},
+		TargetLabels: labels.Labels{},
 	}
 }
 
@@ -1326,6 +1334,7 @@ func summaryFromComponents(name string, t int64, reset int64, count uint64, sum 
 		MetricResetTimestampMs: []int64{
 			reset,
 		},
+		TargetLabels: labels.Labels{},
 	}
 }
 
