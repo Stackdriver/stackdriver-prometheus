@@ -18,6 +18,7 @@ import (
 	"hash/fnv"
 	"reflect"
 	"sort"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -184,8 +185,10 @@ func TestSampleDelivery(t *testing.T) {
 	for i := 0; i < n; i++ {
 		name := fmt.Sprintf("test_metric_%d", i)
 		samples = append(samples, sample{
-			Name:           name,
-			Labels:         map[string]string{},
+			Name: name,
+			Labels: map[string]string{
+				model.InstanceLabel: strconv.Itoa(i),
+			},
 			Value:          float64(i),
 			ResetTimestamp: 1234567890000,
 			Timestamp:      2234567890000,
@@ -218,8 +221,10 @@ func TestSampleDeliveryMultiShard(t *testing.T) {
 	for i := 0; i < n; i++ {
 		name := fmt.Sprintf("test_metric_%d", i)
 		samples = append(samples, sample{
-			Name:           name,
-			Labels:         map[string]string{},
+			Name: name,
+			Labels: map[string]string{
+				model.InstanceLabel: strconv.Itoa(i),
+			},
 			Value:          float64(i),
 			ResetTimestamp: 1234567890000,
 			Timestamp:      2234567890000,
@@ -254,8 +259,10 @@ func TestSampleDeliveryTimeout(t *testing.T) {
 	for i := 0; i < n; i++ {
 		name := fmt.Sprintf("test_metric_%d", i)
 		samples = append(samples, sample{
-			Name:           name,
-			Labels:         map[string]string{},
+			Name: name,
+			Labels: map[string]string{
+				model.InstanceLabel: strconv.Itoa(i),
+			},
 			Value:          float64(i),
 			ResetTimestamp: 1234567890000,
 			Timestamp:      2234567890000,
@@ -298,7 +305,8 @@ func TestRelabel(t *testing.T) {
 		name := fmt.Sprintf("test_metric_%d", i)
 		samples = append(samples,
 			sample{
-				Name: name, Labels: map[string]string{
+				Name: name,
+				Labels: map[string]string{
 					"drop_label": "x",
 				},
 				Value:          float64(i),
@@ -307,9 +315,11 @@ func TestRelabel(t *testing.T) {
 			})
 		expectedSamples = append(expectedSamples,
 			sample{
-				Name: name, Labels: map[string]string{
-					"external_1": "a",
-					"external_2": "b",
+				Name: name,
+				Labels: map[string]string{
+					"external_1":        "a",
+					"external_2":        "b",
+					model.InstanceLabel: strconv.Itoa(i),
 				},
 				Value:          float64(i),
 				ResetTimestamp: 1234567890000,
@@ -343,9 +353,10 @@ func TestRelabel(t *testing.T) {
 		sample{
 			Name: "multi_metric",
 			Labels: map[string]string{
-				"keep_metric": "true",
-				"external_1":  "a",
-				"external_2":  "b",
+				"keep_metric":       "true",
+				"external_1":        "a",
+				"external_2":        "b",
+				model.InstanceLabel: strconv.Itoa(i),
 			},
 			Value:          float64(i),
 			ResetTimestamp: 1234567890001,
@@ -396,8 +407,10 @@ func TestSampleDeliveryOrder(t *testing.T) {
 	for i := 0; i < n; i++ {
 		name := fmt.Sprintf("test_metric_%d", i%ts)
 		samples = append(samples, sample{
-			Name:           name,
-			Labels:         map[string]string{},
+			Name: name,
+			Labels: map[string]string{
+				model.InstanceLabel: strconv.Itoa(i),
+			},
 			Value:          float64(i),
 			ResetTimestamp: 1234567890001,
 			Timestamp:      1234567890001 + int64(i),
@@ -426,7 +439,8 @@ func TestSampleOutOfOrder(t *testing.T) {
 		samples = append(samples, sample{
 			Name: "test_metric",
 			Labels: map[string]string{
-				"key": fmt.Sprintf("%d", i),
+				"key":               fmt.Sprintf("%d", i),
+				model.InstanceLabel: strconv.Itoa(i),
 			},
 			Value:          float64(i),
 			ResetTimestamp: 1234567890001,
@@ -476,7 +490,8 @@ func TestSampleOutOfOrderMultiShard(t *testing.T) {
 		samples = append(samples, sample{
 			Name: "test_metric",
 			Labels: map[string]string{
-				"key": fmt.Sprintf("%d", i),
+				"key":               fmt.Sprintf("%d", i),
+				model.InstanceLabel: strconv.Itoa(i),
 			},
 			Value:          float64(i),
 			ResetTimestamp: 1234567890001,
@@ -522,8 +537,10 @@ func TestStoreEmptyRequest(t *testing.T) {
 	for i := 0; i < n; i++ {
 		name := fmt.Sprintf("test_metric_%d", i)
 		samples = append(samples, sample{
-			Name:           name,
-			Labels:         map[string]string{},
+			Name: name,
+			Labels: map[string]string{
+				model.InstanceLabel: strconv.Itoa(i),
+			},
 			Value:          float64(i),
 			ResetTimestamp: 1234567890000,
 			Timestamp:      2234567890000,
@@ -535,19 +552,29 @@ func TestStoreEmptyRequest(t *testing.T) {
 
 	// These should be received by the client.
 	for _, s := range samples {
-		m.Append(&retrieval.MetricFamily{
-			MetricFamily: &dto.MetricFamily{
+		metricFamily, err := retrieval.NewMetricFamily(
+			&dto.MetricFamily{
 				Name: proto.String(s.Name),
 				Type: dto.MetricType_UNTYPED.Enum(),
 				Metric: []*dto.Metric{
-					&dto.Metric{},
+					&dto.Metric{
+						Label: []*dto.LabelPair{
+							&dto.LabelPair{
+								Name:  proto.String(model.InstanceLabel),
+								Value: proto.String("i123"),
+							},
+						},
+					},
 				},
 			},
-			MetricResetTimestampMs: []int64{
+			[]int64{
 				1234567890000,
 			},
-			TargetLabels: labels.Labels{TestTargetLabel},
-		})
+			labels.Labels{TestTargetLabel})
+		if err != nil {
+			panic(err)
+		}
+		m.Append(metricFamily)
 	}
 	m.Start()
 	defer m.Stop()
@@ -684,6 +711,11 @@ func samplesToMetricFamily(samples ...sample) *retrieval.MetricFamily {
 			Name:  proto.String("_kubernetes_project_id_or_name"),
 			Value: proto.String("1234567890"),
 		})
+		metricLabels = append(metricLabels,
+			&dto.LabelPair{
+				Name:  proto.String(model.InstanceLabel),
+				Value: proto.String(strconv.Itoa(int(samples[0].Value))),
+			})
 		for ln, lv := range samples[i].Labels {
 			metricLabels = append(metricLabels, &dto.LabelPair{
 				Name:  proto.String(ln),
@@ -699,13 +731,24 @@ func samplesToMetricFamily(samples ...sample) *retrieval.MetricFamily {
 		}
 		resetTimestamps[i] = samples[i].ResetTimestamp
 	}
-	return &retrieval.MetricFamily{
-		MetricFamily: &dto.MetricFamily{
+	metricFamily, err := retrieval.NewMetricFamily(
+		&dto.MetricFamily{
 			Name:   proto.String(samples[0].Name),
 			Type:   dto.MetricType_COUNTER.Enum(),
 			Metric: metrics,
 		},
-		MetricResetTimestampMs: resetTimestamps,
-		TargetLabels:           labels.Labels{TestTargetLabel},
+		resetTimestamps,
+		labels.Labels{
+			TestTargetLabel,
+			// This label isn't part of the monitored resource, so
+			// two time series that only differ by this, will be
+			// seen as one time series by Stackdriver. Samples
+			// across those two time series are subject to Stackdriver
+			// constraints, such as ordering.
+			{"__not_in_monitored_resource", strconv.Itoa(int(samples[0].Value))},
+		})
+	if err != nil {
+		panic(err)
 	}
+	return metricFamily
 }

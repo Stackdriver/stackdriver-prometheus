@@ -659,30 +659,36 @@ func (sl *scrapeLoop) append(b []byte, ts time.Time) (total, added int, err erro
 
 	extractor := newPointExtractor(sl.resetPointMap)
 loop:
-	for name, metricFamily := range metricFamilies {
+	for name, metricFamilyPb := range metricFamilies {
 		total++
-		metricFamily.Metric = relabelMetrics(metricFamily.Metric, sl.sampleMutator)
+		metricFamilyPb.Metric = relabelMetrics(metricFamilyPb.Metric, sl.sampleMutator)
 		// Drop family if we dropped all metrics.
-		if metricFamily.Metric == nil {
+		if metricFamilyPb.Metric == nil {
 			continue
 		}
 		metrics := []*dto.Metric{}
 		resetTimes := []int64{}
-		for _, metric := range metricFamily.Metric {
+		for _, metric := range metricFamilyPb.Metric {
 			if metric.TimestampMs == nil {
 				metric.TimestampMs = proto.Int64(defTime)
 			}
-			if emit, resetTime := extractor.UpdateValue(metricFamily, metric); emit {
+			if emit, resetTime := extractor.UpdateValue(metricFamilyPb, metric); emit {
 				metrics = append(metrics, metric)
 				resetTimeMs := timestamp.FromTime(resetTime)
 				resetTimes = append(resetTimes, resetTimeMs)
 			}
 		}
-		metricFamily.Metric = metrics
-		if len(metricFamily.Metric) == 0 {
+		metricFamilyPb.Metric = metrics
+		if len(metricFamilyPb.Metric) == 0 {
 			continue
 		}
-		err = app.Add(&MetricFamily{metricFamily, resetTimes, sl.targetLabels})
+		var metricFamily *MetricFamily
+		metricFamily, err = NewMetricFamily(metricFamilyPb, resetTimes, sl.targetLabels)
+		if err != nil {
+			level.Warn(sl.l).Log("msg", "cannot handle metric", "err", err)
+			continue
+		}
+		err = app.Add(metricFamily)
 		switch err {
 		case nil:
 		case ErrOutOfOrderSample:
@@ -742,16 +748,17 @@ const (
 
 func (sl *scrapeLoop) report(start time.Time, duration time.Duration, scraped, appended int, err error) error {
 	sl.scraper.report(start, duration, err)
-
 	ts := timestamp.FromTime(start)
 
-	var health float64
-	if err == nil {
-		health = 1
+	if err != nil {
+		// Do not write synthetic metrics when the endpoint is down. See
+		// https://docs.google.com/document/d/1pPGjoxDXBf0GRK6b6tH00xdiWlw0mASgSkCZL9Ilws4/edit#heading=h.jl81e3on7hok
+		return nil
 	}
-	app := sl.appender()
 
-	if err := sl.addReportSample(app, scrapeHealthMetricName, ts, health); err != nil {
+	app := sl.appender()
+	const healthy = float64(1)
+	if err := sl.addReportSample(app, scrapeHealthMetricName, ts, healthy); err != nil {
 		return err
 	}
 	if err := sl.addReportSample(app, scrapeDurationMetricName, ts, duration.Seconds()); err != nil {
@@ -770,14 +777,14 @@ var metricLabelName = labels.MetricName
 
 func (sl *scrapeLoop) addReportSample(app Appender, name string, t int64, v float64) error {
 	metricLabels := relabel.LabelPairs{
-		{Name: &metricLabelName, Value: &name},
+		{Name: proto.String(metricLabelName), Value: proto.String(name)},
 	}
 
 	metricLabels = sl.reportSampleMutator(metricLabels)
 
 	// TODO(jkohen): reportSampleMutator calls mutateReportSampleLabels, which returns the metric name and the target labels, so we could simplify the code to do just that.
 
-	metricFamily := &dto.MetricFamily{
+	pb := &dto.MetricFamily{
 		Name: proto.String(name),
 		Type: dto.MetricType_GAUGE.Enum(),
 		Metric: []*dto.Metric{
@@ -790,7 +797,12 @@ func (sl *scrapeLoop) addReportSample(app Appender, name string, t int64, v floa
 			},
 		},
 	}
-	err := app.Add(&MetricFamily{metricFamily, []int64{NoTimestamp}, sl.targetLabels})
+	metricFamily, err := NewMetricFamily(pb, []int64{NoTimestamp}, sl.targetLabels)
+	if err != nil {
+		level.Warn(sl.l).Log("msg", "cannot handle metric", "err", err)
+		return err
+	}
+	err = app.Add(metricFamily)
 	switch err {
 	case nil:
 		return nil

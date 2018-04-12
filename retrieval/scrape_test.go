@@ -47,6 +47,10 @@ const (
 	expectedTimeout = "1.500000"
 )
 
+var (
+	instanceLabelPair = &dto.LabelPair{Name: proto.String(model.InstanceLabel), Value: proto.String("i123")}
+)
+
 // Implements resetPointMapper.
 type fakeResetPointMap struct {
 }
@@ -459,7 +463,10 @@ func TestScrapeLoopStopBeforeRun(t *testing.T) {
 	}
 }
 
-func nopMutator(l relabel.LabelPairs) relabel.LabelPairs { return l }
+func nopMutator(l relabel.LabelPairs) relabel.LabelPairs {
+	// Stackdriver requires the instance label.
+	return append(l, instanceLabelPair)
+}
 
 func TestScrapeLoopStop(t *testing.T) {
 	var (
@@ -508,14 +515,26 @@ func TestScrapeLoopStop(t *testing.T) {
 	}
 	// All samples in a scrape must have the same timestmap.
 	var ts int64
+	var upValues []float64
 	for i, family := range appender.result {
 		for _, metric := range family.Metric {
 			if i%5 == 0 {
 				ts = *metric.TimestampMs
 			} else if *metric.TimestampMs != ts {
-				t.Fatalf("Unexpected multiple timestamps within single scrape")
+				t.Errorf("Unexpected multiple timestamps within single scrape")
+			}
+			if family.GetName() == "up" {
+				upValue := metric.Gauge.GetValue()
+				if upValue != 1 {
+					t.Errorf("bad 'up' value; want 1, got %v", upValue)
+				}
+				upValues = append(upValues, upValue)
 			}
 		}
+	}
+	if len(upValues) != 2 {
+		t.Errorf("missing 'up' metrics; expected %d, got %d; MetricFamily is %v",
+			numScrapes, len(upValues), appender.result)
 	}
 }
 
@@ -657,7 +676,7 @@ func TestScrapeLoopMutator(t *testing.T) {
 		nil, &fakeResetPointMap{},
 		nil, nil, labels.Labels{},
 		func(input relabel.LabelPairs) relabel.LabelPairs {
-			output := relabel.LabelPairs{}
+			output := nopMutator(relabel.LabelPairs{})
 			for _, label := range input {
 				output = append(output, &dto.LabelPair{Name: label.Name, Value: label.Value})
 			}
@@ -694,7 +713,7 @@ func TestScrapeLoopMutatorDeletesMetric(t *testing.T) {
 		nil, &fakeResetPointMap{},
 		nil, nil, labels.Labels{},
 		func(lset relabel.LabelPairs) relabel.LabelPairs {
-			var lb relabel.LabelPairs
+			output := nopMutator(relabel.LabelPairs{})
 			for _, label := range lset {
 				if *label.Name == "delete" {
 					if *label.Value == "label" {
@@ -705,9 +724,9 @@ func TestScrapeLoopMutatorDeletesMetric(t *testing.T) {
 						return nil
 					}
 				}
-				lb = append(lb, &dto.LabelPair{Name: label.Name, Value: label.Value})
+				output = append(output, &dto.LabelPair{Name: label.Name, Value: label.Value})
 			}
-			return lb
+			return output
 		},
 		nopMutator,
 		func() Appender { return app },
@@ -724,8 +743,8 @@ func TestScrapeLoopMutatorDeletesMetric(t *testing.T) {
 	// DeepEqual will report NaNs as being different, so replace with a different value.
 	result := app.Sorted()
 	want := []*MetricFamily{
-		{
-			MetricFamily: &dto.MetricFamily{
+		mustMetricFamily(NewMetricFamily(
+			&dto.MetricFamily{
 				Name: proto.String("metric_b"),
 				Type: dto.MetricType_UNTYPED.Enum(),
 				Metric: []*dto.Metric{
@@ -735,6 +754,7 @@ func TestScrapeLoopMutatorDeletesMetric(t *testing.T) {
 						},
 						TimestampMs: proto.Int64(timestamp.FromTime(now)),
 						Label: []*dto.LabelPair{
+							instanceLabelPair,
 							{
 								Name:  proto.String("keep"),
 								Value: proto.String("x"),
@@ -747,6 +767,7 @@ func TestScrapeLoopMutatorDeletesMetric(t *testing.T) {
 						},
 						TimestampMs: proto.Int64(timestamp.FromTime(now)),
 						Label: []*dto.LabelPair{
+							instanceLabelPair,
 							{
 								Name:  proto.String("keep"),
 								Value: proto.String("y"),
@@ -755,12 +776,11 @@ func TestScrapeLoopMutatorDeletesMetric(t *testing.T) {
 					},
 				},
 			},
-			MetricResetTimestampMs: []int64{
+			[]int64{
 				NoTimestamp,
 				NoTimestamp,
 			},
-			TargetLabels: labels.Labels{},
-		},
+			labels.Labels{})),
 	}
 	sort.Sort(ByName(want))
 	if !reflect.DeepEqual(want, result) {
@@ -794,7 +814,7 @@ func TestScrapeLoopAppendSampleLimit(t *testing.T) {
 			"metric_b 1\n"+
 			"metric_c 1\n"), now)
 	if err != errSampleLimit {
-		t.Fatalf("Did not see expected sample limit error: %s", err)
+		t.Errorf("Did not see expected sample limit error: %v", err)
 	}
 
 	// Check that the Counter has been incremented a simgle time for the scrape,
@@ -806,14 +826,14 @@ func TestScrapeLoopAppendSampleLimit(t *testing.T) {
 	}
 	value := metric.GetCounter().GetValue()
 	if (value - beforeMetricValue) != 1 {
-		t.Fatalf("Unexpected change of sample limit metric: %f", (value - beforeMetricValue))
+		t.Errorf("Unexpected change of sample limit metric: %f", (value - beforeMetricValue))
 	}
 
 	// And verify that we got the samples that fit under the limit. We
 	// cannot do a deep comparison, because the order of the metrics in the
 	// input is undefined.
 	if len(resApp.result) != 1 {
-		t.Fatalf("Appended samples not as expected. Wanted 1 sample, got: %+v", resApp.result)
+		t.Errorf("Appended samples not as expected. Wanted 1 sample, got: %+v", resApp.result)
 	}
 }
 
@@ -869,15 +889,8 @@ func TestScrapeLoopRunReportsTargetDownOnScrapeError(t *testing.T) {
 
 	sl.run(10*time.Millisecond, time.Hour, nil)
 
-	if appender.result == nil {
-		t.Fatalf("missing 'up' value; got no results")
-	}
-	if appender.result[0].Metric == nil ||
-		appender.result[0].Metric[0].GetGauge().Value == nil {
-		t.Fatalf("missing 'up' value; MetricFamily is <%v>", appender.result[0].String())
-	}
-	if *appender.result[0].Metric[0].Gauge.Value != 0 {
-		t.Fatalf("bad 'up' value; want 0, got %v", *appender.result[0].Metric[0].Gauge.Value)
+	if appender.result != nil {
+		t.Fatalf("unexpected 'up' value; got %v", appender.result)
 	}
 }
 
@@ -905,15 +918,8 @@ func TestScrapeLoopRunReportsTargetDownOnInvalidUTF8(t *testing.T) {
 
 	sl.run(10*time.Millisecond, time.Hour, nil)
 
-	if appender.result == nil {
-		t.Fatalf("missing 'up' value; got no results")
-	}
-	if appender.result[0].Metric == nil ||
-		appender.result[0].Metric[0].GetGauge().Value == nil {
-		t.Fatalf("missing 'up' value; MetricFamily is <%v>", appender.result[0].String())
-	}
-	if *appender.result[0].Metric[0].Gauge.Value != 0 {
-		t.Fatalf("bad 'up' value; want 0, got %v", appender.result[0].Metric[0].Gauge.Value)
+	if appender.result != nil {
+		t.Fatalf("unexpected 'up' value; got %v", appender.result)
 	}
 }
 
@@ -1237,8 +1243,8 @@ func (ts *testScraper) scrape(ctx context.Context, w io.Writer) error {
 
 // untypedFromTriplet is a helper to adapt Prometheus unit tests to the new API based on MetricFamily.
 func untypedFromTriplet(name string, t int64, v float64) *MetricFamily {
-	return &MetricFamily{
-		MetricFamily: &dto.MetricFamily{
+	return mustMetricFamily(NewMetricFamily(
+		&dto.MetricFamily{
 			Name: proto.String(name),
 			Type: dto.MetricType_UNTYPED.Enum(),
 			Metric: []*dto.Metric{
@@ -1247,19 +1253,19 @@ func untypedFromTriplet(name string, t int64, v float64) *MetricFamily {
 						Value: proto.Float64(v),
 					},
 					TimestampMs: proto.Int64(t),
+					Label:       []*dto.LabelPair{instanceLabelPair},
 				},
 			},
 		},
-		MetricResetTimestampMs: []int64{
+		[]int64{
 			NoTimestamp,
 		},
-		TargetLabels: labels.Labels{},
-	}
+		labels.Labels{}))
 }
 
 func counterFromComponents(name string, t int64, reset int64, v float64) *MetricFamily {
-	return &MetricFamily{
-		MetricFamily: &dto.MetricFamily{
+	return mustMetricFamily(NewMetricFamily(
+		&dto.MetricFamily{
 			Name: proto.String(name),
 			Type: dto.MetricType_COUNTER.Enum(),
 			Metric: []*dto.Metric{
@@ -1268,19 +1274,19 @@ func counterFromComponents(name string, t int64, reset int64, v float64) *Metric
 						Value: proto.Float64(v),
 					},
 					TimestampMs: proto.Int64(t),
+					Label:       []*dto.LabelPair{instanceLabelPair},
 				},
 			},
 		},
-		MetricResetTimestampMs: []int64{
+		[]int64{
 			reset,
 		},
-		TargetLabels: labels.Labels{},
-	}
+		labels.Labels{}))
 }
 
 func histogramFromComponents(name string, t int64, reset int64, c1, c2 uint64, sum float64) *MetricFamily {
-	return &MetricFamily{
-		MetricFamily: &dto.MetricFamily{
+	return mustMetricFamily(NewMetricFamily(
+		&dto.MetricFamily{
 			Name: proto.String(name),
 			Type: dto.MetricType_HISTOGRAM.Enum(),
 			Metric: []*dto.Metric{
@@ -1300,19 +1306,19 @@ func histogramFromComponents(name string, t int64, reset int64, c1, c2 uint64, s
 						},
 					},
 					TimestampMs: proto.Int64(t),
+					Label:       []*dto.LabelPair{instanceLabelPair},
 				},
 			},
 		},
-		MetricResetTimestampMs: []int64{
+		[]int64{
 			reset,
 		},
-		TargetLabels: labels.Labels{},
-	}
+		labels.Labels{}))
 }
 
 func summaryFromComponents(name string, t int64, reset int64, count uint64, sum float64) *MetricFamily {
-	return &MetricFamily{
-		MetricFamily: &dto.MetricFamily{
+	return mustMetricFamily(NewMetricFamily(
+		&dto.MetricFamily{
 			Name: proto.String(name),
 			Type: dto.MetricType_SUMMARY.Enum(),
 			Metric: []*dto.Metric{
@@ -1328,14 +1334,14 @@ func summaryFromComponents(name string, t int64, reset int64, count uint64, sum 
 						},
 					},
 					TimestampMs: proto.Int64(t),
+					Label:       []*dto.LabelPair{instanceLabelPair},
 				},
 			},
 		},
-		MetricResetTimestampMs: []int64{
+		[]int64{
 			reset,
 		},
-		TargetLabels: labels.Labels{},
-	}
+		labels.Labels{}))
 }
 
 func addMetricLabels(metricFamily *MetricFamily, labelName, labelValue string) *MetricFamily {

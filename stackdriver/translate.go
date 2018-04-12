@@ -110,6 +110,7 @@ func (t *Translator) translateFamily(family *retrieval.MetricFamily) ([]*monitor
 			level.Warn(t.logger).Log(
 				"msg", "cannot extract Stackdriver monitored resource from metric",
 				"family", family.GetName(),
+				"target_labels", family.TargetLabels,
 				"metric", metric)
 			continue
 		}

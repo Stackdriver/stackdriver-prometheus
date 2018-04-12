@@ -228,17 +228,7 @@ func (t *QueueManager) Append(metricFamily *retrieval.MetricFamily) error {
 	queueLength.WithLabelValues(t.queueName).Add(float64(len(metricFamily.Metric)))
 	t.shardsMtx.RLock()
 	for i := range metricFamily.Metric {
-		metricFamilySlice := &retrieval.MetricFamily{
-			MetricFamily: &dto.MetricFamily{
-				Name:   metricFamily.Name,
-				Help:   metricFamily.Help,
-				Type:   metricFamily.Type,
-				Metric: metricFamily.Metric[i : i+1],
-			},
-			MetricResetTimestampMs: metricFamily.MetricResetTimestampMs[i : i+1],
-			TargetLabels:           metricFamily.TargetLabels,
-		}
-		t.shards.enqueue(metricFamilySlice)
+		t.shards.enqueue(metricFamily.Slice(i))
 	}
 	t.shardsMtx.RUnlock()
 	return nil

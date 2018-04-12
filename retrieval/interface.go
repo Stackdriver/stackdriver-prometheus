@@ -21,6 +21,7 @@ import (
 	"sort"
 
 	dto "github.com/prometheus/client_model/go"
+	"github.com/prometheus/common/model"
 	"github.com/prometheus/prometheus/pkg/labels"
 )
 
@@ -44,11 +45,13 @@ type MetricFamily struct {
 	MetricResetTimestampMs []int64
 	// see Target.DiscoveredLabels()
 	TargetLabels labels.Labels
+	// Extracted from the metric labels, preserved separately in case of relabelling.
+	instanceLabel string
 }
 
 func (f *MetricFamily) String() string {
-	return fmt.Sprintf("MetricFamily<dto.MetricFamily: %v MetricResetTimestampMs: %v TargetLabels: %v>",
-		f.MetricFamily, f.MetricResetTimestampMs, f.TargetLabels)
+	return fmt.Sprintf("MetricFamily<dto.MetricFamily: %v MetricResetTimestampMs: %v TargetLabels: %v instanceLabel: \"%v\">",
+		f.MetricFamily, f.MetricResetTimestampMs, f.TargetLabels, f.instanceLabel)
 }
 
 // SeparatorByte is a byte that cannot occur in valid UTF-8 sequences and is
@@ -63,23 +66,50 @@ func (f LabelPairsByName) Len() int           { return len(f) }
 func (f LabelPairsByName) Swap(i, j int)      { f[i], f[j] = f[j], f[i] }
 func (f LabelPairsByName) Less(i, j int) bool { return f[i].GetName() < f[j].GetName() }
 
-// LabelsByName implements sort.Interface for labels.Labels.
-type LabelsByName labels.Labels
+func NewMetricFamily(pb *dto.MetricFamily, metricResetTimestampMs []int64, targetLabels labels.Labels) (*MetricFamily, error) {
+	var instanceLabel string
+LabelLoop:
+	for _, metric := range pb.Metric {
+		for _, label := range metric.GetLabel() {
+			if label.GetName() == model.InstanceLabel {
+				instanceLabel = label.GetValue()
+				break LabelLoop
+			}
+		}
+	}
+	if len(instanceLabel) == 0 {
+		return nil, fmt.Errorf("missing label '%s' in metric '%s'", model.InstanceLabel, pb.GetName())
+	}
+	return &MetricFamily{
+		MetricFamily:           pb,
+		MetricResetTimestampMs: metricResetTimestampMs,
+		TargetLabels:           targetLabels,
+		instanceLabel:          instanceLabel,
+	}, nil
+}
 
-func (f LabelsByName) Len() int           { return len(f) }
-func (f LabelsByName) Swap(i, j int)      { f[i], f[j] = f[j], f[i] }
-func (f LabelsByName) Less(i, j int) bool { return f[i].Name < f[j].Name }
+func (f *MetricFamily) Slice(i int) *MetricFamily {
+	return &MetricFamily{
+		MetricFamily: &dto.MetricFamily{
+			Name:   f.Name,
+			Help:   f.Help,
+			Type:   f.Type,
+			Metric: f.Metric[i : i+1],
+		},
+		MetricResetTimestampMs: f.MetricResetTimestampMs[i : i+1],
+		TargetLabels:           f.TargetLabels,
+		instanceLabel:          f.instanceLabel,
+	}
+}
 
 func (f *MetricFamily) Fingerprint() uint64 {
 	h := hashNew()
 	h = hashAdd(h, f.GetName())
-	sort.Sort(LabelsByName(f.TargetLabels))
-	for i := range f.TargetLabels {
-		h = hashAddByte(h, SeparatorByte)
-		h = hashAdd(h, f.TargetLabels[i].Name)
-		h = hashAddByte(h, SeparatorByte)
-		h = hashAdd(h, f.TargetLabels[i].Value)
+	h = hashAddByte(h, SeparatorByte)
+	if len(f.instanceLabel) == 0 {
+		panic("you must use NewMetricFamily to create instances of that type")
 	}
+	h = hashAdd(h, f.instanceLabel)
 	for _, metric := range f.GetMetric() {
 		sort.Sort(LabelPairsByName(metric.GetLabel()))
 		for _, label := range metric.GetLabel() {

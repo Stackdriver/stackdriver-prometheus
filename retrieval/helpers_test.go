@@ -61,3 +61,10 @@ func (a *collectResultAppender) Sorted() []*MetricFamily {
 func (a *collectResultAppender) Reset() {
 	a.result = nil
 }
+
+func mustMetricFamily(metricFamily *MetricFamily, err error) *MetricFamily {
+	if err != nil {
+		panic(err)
+	}
+	return metricFamily
+}
