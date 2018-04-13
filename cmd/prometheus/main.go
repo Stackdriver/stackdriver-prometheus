@@ -101,7 +101,7 @@ func main() {
 
 	a.Flag("stackdriver.k8s-resource-types",
 		"Whether to export Stackdriver k8s_* resource types, otherwise export gke_container.").
-		Default("false").BoolVar(&cfg.sdCfg.K8sResourceTypes)
+		Default("true").BoolVar(&cfg.sdCfg.K8sResourceTypes)
 
 	a.Flag("web.listen-address", "Address to listen on for UI, API, and telemetry.").
 		Default("0.0.0.0:9090").StringVar(&cfg.web.ListenAddress)
