@@ -173,7 +173,7 @@ items:
           max_samples_per_send: 200
           max_shards: 10000
         write_relabel_configs:
-        # These labels are redundant for Stackdriver.
+        # These labels are generally redundant with the Stackdriver monitored resource labels.
         - source_labels: [job]
           target_label: job
           replacement: ""
