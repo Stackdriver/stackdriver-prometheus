@@ -708,7 +708,7 @@ func samplesToMetricFamily(samples ...sample) *retrieval.MetricFamily {
 		}
 		metricLabels := make([]*dto.LabelPair, 0)
 		metricLabels = append(metricLabels, &dto.LabelPair{
-			Name:  proto.String("_kubernetes_project_id_or_name"),
+			Name:  proto.String(ProjectIdLabel),
 			Value: proto.String("1234567890"),
 		})
 		metricLabels = append(metricLabels,

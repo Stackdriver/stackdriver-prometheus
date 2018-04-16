@@ -22,7 +22,7 @@ import (
 )
 
 const (
-	ProjectIdLabel = "_kubernetes_project_id_or_name"
+	ProjectIdLabel = "_stackdriver_project_id"
 )
 
 // TODO(jkohen): ensure these are sorted from more specific to less specific.
