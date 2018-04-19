@@ -1,3 +1,5 @@
+#!/bin/sh
+
 version="$1"
 
 if [[ -z "${version}" ]]; then
