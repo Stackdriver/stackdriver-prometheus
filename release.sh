@@ -24,10 +24,10 @@ git checkout -b "release-${version}"
 # 3. Update `DOCKER_IMAGE_NAME` in `Makefile` to use the public docker repo. The value is provided and commented out.
 
 # Comment out private repo
-/bin/sh -c "${SED_I} -E 's/^(DOCKER.*gcr.io\/prometheus-to-sd\/stackdriver-prometheus)/#\1/g' Makefile"
+/bin/sh -c "${SED_I} -E 's/^(DOCKER.*gcr.io\/prometheus-to-sd)/#\1/g' Makefile"
 
 # Uncomment public repo
-/bin/sh -c "${SED_I} -E 's/^#(DOCKER.*gcr.io\/stackdriver-prometheus\/stackdriver-prometheus)/\1/g' Makefile"
+/bin/sh -c "${SED_I} -E 's/^#(DOCKER.*gcr.io\/stackdriver-prometheus)/\1/g' Makefile"
 
 # 4. Run `make push`.
 make push
