@@ -78,11 +78,15 @@ build: promu
 	@echo ">> building binaries"
 	@$(PROMU) build --prefix $(PREFIX)
 
+build-linux-amd64: promu
+	@echo ">> building linux amd64 binaries"
+	@GOOS=linux GOARCH=amd64 $(PROMU) build --prefix $(PREFIX)
+
 tarball: promu
 	@echo ">> building release tarball"
 	@$(PROMU) tarball --prefix $(PREFIX) $(BIN_DIR)
 
-docker: build
+docker: build-linux-amd64
 	@echo ">> building docker image"
 	@docker build -t "$(DOCKER_IMAGE_NAME):$(DOCKER_IMAGE_TAG)" .
 
