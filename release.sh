@@ -8,7 +8,7 @@ fi
 
 SED_I="sed -i"
 if [[ "$(uname -s)" == "Darwin" ]]; then
-	SED_I="${SED_I} ''"
+    SED_I="${SED_I} ''"
 fi
 
 # ###########################
