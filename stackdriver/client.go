@@ -38,8 +38,7 @@ import (
 )
 
 const (
-	// TODO(jkohen): Use a custom prefix specific to Prometheus.
-	metricsPrefix             = "custom.googleapis.com"
+	metricsPrefix             = "external.googleapis.com/prometheus"
 	maxTimeseriesesPerRequest = 200
 	MonitoringWriteScope      = "https://www.googleapis.com/auth/monitoring.write"
 )
