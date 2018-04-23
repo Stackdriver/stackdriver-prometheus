@@ -8,7 +8,7 @@ The long-term plan is to integrate with Prometheus server as a sidecar. We are
 working on [a
 design](https://docs.google.com/document/d/1TEqqE_Stq04drhjSU1I7Ctmuy0dpsvlPL1AKxqEQoSg/edit)
 with the necessary changes to the Prometheus server within the Prometheus
-community. Access to the design document may require membership on
+community. Discussion happens in the document and in [this thread](https://groups.google.com/d/topic/prometheus-developers/BdhHaSP-qG0/discussion). Access to the design document may require membership on
 [prometheus-developers@googlegroups.com](https://groups.google.com/forum/#!forum/prometheus-developers).
 
 ## Source Code Headers
