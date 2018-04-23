@@ -9,7 +9,7 @@ working on [a
 design](https://docs.google.com/document/d/1TEqqE_Stq04drhjSU1I7Ctmuy0dpsvlPL1AKxqEQoSg/edit)
 with the necessary changes to the Prometheus server within the Prometheus
 community. Access to the design document may require membership on
-prometheus-developers@googlegroups.com.
+[prometheus-developers@googlegroups.com](https://groups.google.com/forum/#!forum/prometheus-developers).
 
 ## Source Code Headers
 
