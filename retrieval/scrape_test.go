@@ -1000,6 +1000,77 @@ func TestScrapeLoopOutOfBoundsTimeError(t *testing.T) {
 	}
 }
 
+func TestEmptySum(t *testing.T) {
+	app := &collectResultAppender{}
+
+	resetPointMap := newSimpleResetPointMap()
+	sl := newScrapeLoop(context.Background(),
+		nil, &resetPointMap,
+		nil, nil, labels.Labels{},
+		nopMutator,
+		nopMutator,
+		func() Appender { return app },
+	)
+
+	now := time.Now()
+	// Step #1. No resource tracker, reset time is unknown, so drop the point.
+	{
+		if _, _, err := sl.append([]byte(
+			"# TYPE metric_a counter\n"+
+				"metric_a 10\n"+
+				"# TYPE metric_h histogram\n"+
+				"metric_h{le=\"100\"} 1\n"+
+				"metric_h{le=\"+Inf\"} 10\n"+
+				"metric_h_count 10\n"+
+				"metric_h_sum 123.1\n"+
+				"# TYPE metric_s summary\n"+
+				"metric_s{quantile=\"1\"} 1\n"+
+				"metric_s_count 1\n"), now); err != nil {
+			t.Fatalf("Unexpected append error: %s", err)
+		}
+		want := []*MetricFamily{}
+		sort.Sort(ByName(want))
+		if !reflect.DeepEqual(want, app.Sorted()) {
+			t.Fatalf("Appended samples not as expected.\nWanted: %+v\nGot:    %+v", want, app.Sorted())
+		}
+		app.Reset()
+	}
+	// Step #2. Reset time for metric_a is extracted from the point
+	// tracker. New time series metric_b shows up, has reset time equal to
+	// point time.
+	{
+		existingReset := now
+		now = now.Add(10 * time.Second)
+		if _, _, err := sl.append([]byte(
+			"# TYPE metric_a counter\n"+
+				"metric_a 20\n"+
+				"# TYPE metric_b counter\n"+
+				"metric_b 11\n"+
+				"# TYPE metric_h histogram\n"+
+				"metric_h{le=\"100\"} 11\n"+
+				"metric_h{le=\"+Inf\"} 30\n"+
+				"metric_h_count 30\n"+
+				"metric_h_sum 223.1\n"+
+				"# TYPE metric_s summary\n"+
+				"metric_s{quantile=\"1\"} 1\n"+
+				"metric_s_count 7\n"), now); err != nil {
+			t.Fatalf("Unexpected append error: %s", err)
+		}
+		resetTime := now.Add(-1 * time.Millisecond)
+		want := []*MetricFamily{
+			counterFromComponents("metric_a", timestamp.FromTime(now), timestamp.FromTime(existingReset), 10),
+			counterFromComponents("metric_b", timestamp.FromTime(now), timestamp.FromTime(resetTime), 11),
+			histogramFromComponents("metric_h", timestamp.FromTime(now), timestamp.FromTime(existingReset), 10, 20, 100),
+			summaryFromComponentsNoSum("metric_s", timestamp.FromTime(now), timestamp.FromTime(existingReset), 6),
+		}
+		sort.Sort(ByName(want))
+		if !reflect.DeepEqual(want, app.Sorted()) {
+			t.Fatalf("Appended samples not as expected.\nWanted: %+v\nGot:    %+v", want, app.Sorted())
+		}
+		app.Reset()
+	}
+}
+
 func TestPointExtractor(t *testing.T) {
 	app := &collectResultAppender{}
 
@@ -1326,6 +1397,33 @@ func summaryFromComponents(name string, t int64, reset int64, count uint64, sum 
 					Summary: &dto.Summary{
 						SampleCount: proto.Uint64(count),
 						SampleSum:   proto.Float64(sum),
+						Quantile: []*dto.Quantile{
+							{
+								Quantile: proto.Float64(1),
+								Value:    proto.Float64(1),
+							},
+						},
+					},
+					TimestampMs: proto.Int64(t),
+					Label:       []*dto.LabelPair{instanceLabelPair},
+				},
+			},
+		},
+		[]int64{
+			reset,
+		},
+		labels.Labels{}))
+}
+
+func summaryFromComponentsNoSum(name string, t int64, reset int64, count uint64) *MetricFamily {
+	return mustMetricFamily(NewMetricFamily(
+		&dto.MetricFamily{
+			Name: proto.String(name),
+			Type: dto.MetricType_SUMMARY.Enum(),
+			Metric: []*dto.Metric{
+				{
+					Summary: &dto.Summary{
+						SampleCount: proto.Uint64(count),
 						Quantile: []*dto.Quantile{
 							{
 								Quantile: proto.Float64(1),
