@@ -661,7 +661,7 @@ func (sl *scrapeLoop) append(b []byte, ts time.Time) (total, added int, err erro
 loop:
 	for name, metricFamilyPb := range metricFamilies {
 		total++
-		metricFamilyPb.Metric = relabelMetrics(metricFamilyPb.Metric, sl.sampleMutator)
+		metricFamilyPb.Metric = relabelMetrics(name, metricFamilyPb.Metric, sl.sampleMutator)
 		// Drop family if we dropped all metrics.
 		if metricFamilyPb.Metric == nil {
 			continue
@@ -814,17 +814,28 @@ func (sl *scrapeLoop) addReportSample(app Appender, name string, t int64, v floa
 }
 
 // relabelMetrics returns nil if the relabeling requested the metric to be dropped.
-func relabelMetrics(inputMetrics []*dto.Metric, mutator labelsMutator) []*dto.Metric {
+func relabelMetrics(name string, inputMetrics []*dto.Metric, mutator labelsMutator) []*dto.Metric {
 	metrics := []*dto.Metric{}
 	for _, metric := range inputMetrics {
 		if metric.Label == nil {
 			// Need to distinguish dropped labels from uninitialized.
 			metric.Label = []*dto.LabelPair{}
 		}
+		// Prometheus relabelling rules support the __name__ label, so
+		// we need to add it to the set of labels passed to the label mutator.
+		metric.Label = append(metric.Label, &dto.LabelPair{
+			Name:  proto.String(metricLabelName),
+			Value: proto.String(name),
+		})
 		// Add target labels and relabeling and store the final label set.
 		metric.Label = mutator(metric.Label)
 		// The label set may be set to nil to indicate dropping.
 		if metric.Label != nil {
+			for i, label := range metric.Label {
+				if *label.Name == metricLabelName {
+					metric.Label = append(metric.Label[:i], metric.Label[i+1:]...)
+				}
+			}
 			if len(metric.Label) == 0 {
 				metric.Label = nil
 			}

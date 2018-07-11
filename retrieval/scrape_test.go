@@ -350,6 +350,15 @@ func TestScrapePoolSync(t *testing.T) {
 				Replacement:  "${1}_copy",
 				TargetLabel:  "my_key_copy",
 			},
+			{
+				// Avoid cloning label '__name__' in the next
+				// rule. This is a quick fix to make the test
+				// agnostic to the metric, because the
+				// functorAppendable is only used to capture a
+				// single arbitrary metric.
+				Action: config.RelabelLabelDrop,
+				Regex:  mustNewRegexp("^__name__$"),
+			},
 			// TODO(jkohen): introduce a test file for relabel.go and move this more complex test case there.
 			{
 				Action:      config.RelabelLabelMap,
@@ -364,6 +373,7 @@ func TestScrapePoolSync(t *testing.T) {
 	var once sync.Once
 	var wg sync.WaitGroup
 	var result *MetricFamily
+	// There are several metrics in the input. Grab the first one.
 	wg.Add(1)
 	app.f = func(metricFamily *MetricFamily) {
 		once.Do(func() {
@@ -406,6 +416,66 @@ func TestScrapePoolSync(t *testing.T) {
 	sort.Sort(LabelPairsByName(got))
 	if !reflect.DeepEqual(want, got) {
 		t.Fatalf("Appended samples not as expected.\nWanted: %+v\nGot:    %+v", want, got)
+	}
+}
+
+func TestFilterByMetricName(t *testing.T) {
+	// Make sure filtering by metric name is supported, like in upstream
+	// Prometheus. The metric name is not stored as a label in this
+	// implementation.
+	server, serverURL := newServer(t)
+	defer server.Close()
+
+	cfg := &config.ScrapeConfig{
+		ScrapeInterval: model.Duration(3 * time.Second),
+		ScrapeTimeout:  scrapeTimeout,
+		MetricRelabelConfigs: []*config.RelabelConfig{
+			{
+				SourceLabels: model.LabelNames{"__name__"},
+				Action:       config.RelabelDrop,
+				Regex:        mustNewRegexp("^metric_.*$"),
+			},
+		},
+	}
+	app := &functorAppendable{}
+	output := &bytes.Buffer{}
+	sp := newScrapePool(cfg, app, log.NewLogfmtLogger(output))
+	var once sync.Once
+	var wg sync.WaitGroup
+	var mtx sync.Mutex
+	var result []*MetricFamily
+	app.f = func(metricFamily *MetricFamily) {
+		once.Do(func() {
+			mtx.Lock()
+			result = append(result, metricFamily)
+			mtx.Unlock()
+		})
+	}
+	// Lazy wait for all results.
+	time.Sleep(200 * time.Millisecond)
+	targetGroup := []*targetgroup.Group{
+		{
+			Targets: []model.LabelSet{
+				{
+					model.SchemeLabel:  model.LabelValue(serverURL.Scheme),
+					model.AddressLabel: model.LabelValue(serverURL.Host),
+				},
+			},
+			Labels: model.LabelSet{},
+			Source: "test",
+		},
+	}
+	// Blocks until stop() is called on the scrapePool.
+	sp.Sync(targetGroup)
+	wg.Wait()
+	sp.stop()
+	if output.Len() > 0 {
+		t.Errorf("succeeded with messages %v", output.String())
+	}
+	for _, family := range result {
+		if *family.Name == "metric_a" || *family.Name == "metric_b" {
+			t.Fatalf("Result includes metrics that should be filtered out: %+v\n", family)
+		}
 	}
 }
 
