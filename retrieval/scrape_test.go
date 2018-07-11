@@ -441,7 +441,6 @@ func TestFilterByMetricName(t *testing.T) {
 	output := &bytes.Buffer{}
 	sp := newScrapePool(cfg, app, log.NewLogfmtLogger(output))
 	var once sync.Once
-	var wg sync.WaitGroup
 	var mtx sync.Mutex
 	var result []*MetricFamily
 	app.f = func(metricFamily *MetricFamily) {
@@ -451,8 +450,6 @@ func TestFilterByMetricName(t *testing.T) {
 			mtx.Unlock()
 		})
 	}
-	// Lazy wait for all results.
-	time.Sleep(200 * time.Millisecond)
 	targetGroup := []*targetgroup.Group{
 		{
 			Targets: []model.LabelSet{
@@ -467,7 +464,8 @@ func TestFilterByMetricName(t *testing.T) {
 	}
 	// Blocks until stop() is called on the scrapePool.
 	sp.Sync(targetGroup)
-	wg.Wait()
+	// Lazy wait for all results.
+	time.Sleep(200 * time.Millisecond)
 	sp.stop()
 	if output.Len() > 0 {
 		t.Errorf("succeeded with messages %v", output.String())
