@@ -661,7 +661,7 @@ func (sl *scrapeLoop) append(b []byte, ts time.Time) (total, added int, err erro
 loop:
 	for name, metricFamilyPb := range metricFamilies {
 		total++
-		metricFamilyPb.Metric = relabelMetrics(metricFamilyPb.Metric, sl.sampleMutator)
+		metricFamilyPb.Metric = relabelMetrics(metricFamilyPb.GetName(), metricFamilyPb.Metric, sl.sampleMutator)
 		// Drop family if we dropped all metrics.
 		if metricFamilyPb.Metric == nil {
 			continue
@@ -814,13 +814,16 @@ func (sl *scrapeLoop) addReportSample(app Appender, name string, t int64, v floa
 }
 
 // relabelMetrics returns nil if the relabeling requested the metric to be dropped.
-func relabelMetrics(inputMetrics []*dto.Metric, mutator labelsMutator) []*dto.Metric {
+func relabelMetrics(metricName string, inputMetrics []*dto.Metric, mutator labelsMutator) []*dto.Metric {
 	metrics := []*dto.Metric{}
 	for _, metric := range inputMetrics {
 		if metric.Label == nil {
 			// Need to distinguish dropped labels from uninitialized.
 			metric.Label = []*dto.LabelPair{}
 		}
+		// Set __name__ label
+		lname := labels.MetricName
+		metric.Label = append(metric.Label, &dto.LabelPair{Name: &lname, Value: &metricName})
 		// Add target labels and relabeling and store the final label set.
 		metric.Label = mutator(metric.Label)
 		// The label set may be set to nil to indicate dropping.
