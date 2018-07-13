@@ -19,8 +19,8 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/go-kit/kit/log"
 	"github.com/Stackdriver/stackdriver-prometheus/retrieval"
+	"github.com/go-kit/kit/log"
 	config_util "github.com/prometheus/common/config"
 	"github.com/prometheus/common/model"
 	"github.com/prometheus/prometheus/config"
