@@ -961,7 +961,9 @@ func subtractResetValue(resetValue PointValue, metric *dto.Metric) {
 		}
 	}
 	if resetValue.Summary.Count > 0 {
-		*metric.Summary.SampleCount -= resetValue.Summary.Count
+ 		if metric.Summary.SampleCount != nil {
+			*metric.Summary.SampleCount -= resetValue.Summary.Count
+ 		}
  		if metric.Summary.SampleSum != nil {
 			*metric.Summary.SampleSum -= resetValue.Summary.Sum
  		}

@@ -1000,7 +1000,7 @@ func TestScrapeLoopOutOfBoundsTimeError(t *testing.T) {
 	}
 }
 
-func TestEmptySum(t *testing.T) {
+func TestEmptySumCount(t *testing.T) {
 	app := &collectResultAppender{}
 
 	resetPointMap := newSimpleResetPointMap()
@@ -1024,8 +1024,7 @@ func TestEmptySum(t *testing.T) {
 				"metric_h_count 10\n"+
 				"metric_h_sum 123.1\n"+
 				"# TYPE metric_s summary\n"+
-				"metric_s{quantile=\"1\"} 1\n"+
-				"metric_s_count 1\n"), now); err != nil {
+				"metric_s{quantile=\"1\"} 1\n"), now); err != nil {
 			t.Fatalf("Unexpected append error: %s", err)
 		}
 		want := []*MetricFamily{}
@@ -1052,8 +1051,7 @@ func TestEmptySum(t *testing.T) {
 				"metric_h_count 30\n"+
 				"metric_h_sum 223.1\n"+
 				"# TYPE metric_s summary\n"+
-				"metric_s{quantile=\"1\"} 1\n"+
-				"metric_s_count 7\n"), now); err != nil {
+				"metric_s{quantile=\"1\"} 1\n"), now); err != nil {
 			t.Fatalf("Unexpected append error: %s", err)
 		}
 		resetTime := now.Add(-1 * time.Millisecond)
@@ -1061,7 +1059,7 @@ func TestEmptySum(t *testing.T) {
 			counterFromComponents("metric_a", timestamp.FromTime(now), timestamp.FromTime(existingReset), 10),
 			counterFromComponents("metric_b", timestamp.FromTime(now), timestamp.FromTime(resetTime), 11),
 			histogramFromComponents("metric_h", timestamp.FromTime(now), timestamp.FromTime(existingReset), 10, 20, 100),
-			summaryFromComponentsNoSum("metric_s", timestamp.FromTime(now), timestamp.FromTime(existingReset), 6),
+			summaryFromComponentsNoSumCount("metric_s", timestamp.FromTime(now), timestamp.FromTime(existingReset)),
 		}
 		sort.Sort(ByName(want))
 		if !reflect.DeepEqual(want, app.Sorted()) {
@@ -1415,7 +1413,7 @@ func summaryFromComponents(name string, t int64, reset int64, count uint64, sum 
 		labels.Labels{}))
 }
 
-func summaryFromComponentsNoSum(name string, t int64, reset int64, count uint64) *MetricFamily {
+func summaryFromComponentsNoSumCount(name string, t int64, reset int64) *MetricFamily {
 	return mustMetricFamily(NewMetricFamily(
 		&dto.MetricFamily{
 			Name: proto.String(name),
@@ -1423,7 +1421,6 @@ func summaryFromComponentsNoSum(name string, t int64, reset int64, count uint64)
 			Metric: []*dto.Metric{
 				{
 					Summary: &dto.Summary{
-						SampleCount: proto.Uint64(count),
 						Quantile: []*dto.Quantile{
 							{
 								Quantile: proto.Float64(1),
