@@ -174,6 +174,7 @@ func New(logger log.Logger, o *Options) *Handler {
 		router = router.WithPrefix(o.RoutePrefix)
 	}
 
+	//lint:ignore SA1019 upstream code.
 	instrf := prometheus.InstrumentHandlerFunc
 	readyf := h.testReady
 
@@ -189,6 +190,7 @@ func New(logger log.Logger, o *Options) *Handler {
 
 	router.Get("/heap", instrf("heap", h.dumpHeap))
 
+	//lint:ignore SA1019 upstream code.
 	router.Get("/metrics", prometheus.Handler().ServeHTTP)
 
 	router.Get("/static/*filepath", instrf("static", h.serveStaticAsset))
