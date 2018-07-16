@@ -4,6 +4,8 @@ This repository contains a variant of the Prometheus server that can send
 metrics to Stackdriver. This software can support most Prometheus deployments
 with minor changes to the Prometheus server configuration.
 
+To install the Stackdriver Prometheus server see [Using Prometheus with Stackdriver Kubernetes Monitoring](https://cloud.google.com/monitoring/kubernetes-engine/prometheus). Stackdriver Kubernetes Monitoring is an add-on for Kubernetes that provides integrated monitoring and logging support with Stackdriver.
+
 The long-term plan is to integrate with Prometheus server as a sidecar. We are
 working on [a
 design](https://docs.google.com/document/d/1TEqqE_Stq04drhjSU1I7Ctmuy0dpsvlPL1AKxqEQoSg/edit)
