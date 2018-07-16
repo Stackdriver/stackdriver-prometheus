@@ -14,7 +14,7 @@ Updating the sample deployment configuration (`documentation/examples/prometheus
 
 1.  Start from the configuration for the previous release and merge any changes from the master branch.
 1.  Update the container image in `documentation/examples/prometheus-service.yml` to the image you released.
-1.  Apply it to your cluster to verify it works. E.g. `kubectl -f apply documentation/examples/prometheus-service.yml`.
+1.  Apply it to your cluster to verify it works. E.g. `kubectl apply -f documentation/examples/prometheus-service.yml`.
 
 ## 3. Publish configuration files
 
