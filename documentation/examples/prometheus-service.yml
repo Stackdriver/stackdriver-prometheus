@@ -62,7 +62,7 @@ items:
   apiVersion: v1
   data:
     prometheus.yml: |
-      # Source: https://github.com/stackdriver/prometheus/blob/master/documentation/examples/prometheus.yml
+      # Source: https://github.com/Stackdriver/stackdriver-prometheus/blob/master/documentation/examples/prometheus-service.yml
       global:
         external_labels:
           _stackdriver_project_id: 'prometheus-to-sd'
