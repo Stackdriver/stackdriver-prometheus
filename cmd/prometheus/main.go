@@ -103,6 +103,10 @@ func main() {
 		"Whether to export Stackdriver k8s_* resource types, otherwise export gke_container.").
 		Default("true").BoolVar(&cfg.sdCfg.K8sResourceTypes)
 
+	a.Flag("stackdriver.metric-prefix",
+		"Prefix for all metrics written to Stackdriver.").
+		Default("external.googleapis.com/prometheus").StringVar(&cfg.sdCfg.MetricPrefix)
+
 	a.Flag("web.listen-address", "Address to listen on for UI, API, and telemetry.").
 		Default("0.0.0.0:9090").StringVar(&cfg.web.ListenAddress)
 

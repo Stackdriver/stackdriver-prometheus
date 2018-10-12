@@ -37,6 +37,7 @@ import (
 type TestStorageClient struct {
 	receivedSamples map[string][]sample
 	expectedSamples map[string][]sample
+	prefixLen       int
 	wg              sync.WaitGroup
 	mtx             sync.Mutex
 	t               *testing.T
@@ -72,6 +73,7 @@ func NewTestStorageClient(t *testing.T) *TestStorageClient {
 	return &TestStorageClient{
 		receivedSamples: map[string][]sample{},
 		expectedSamples: map[string][]sample{},
+		prefixLen:       len(DefaultStackdriverConfig.MetricPrefix),
 		t:               t,
 	}
 }
@@ -139,7 +141,7 @@ func (c *TestStorageClient) Store(req *monitoring.CreateTimeSeriesRequest) error
 		seenTimeSeries[fp] = struct{}{}
 		metricType := ts.Metric.Type
 		// Remove the Stackdriver "domain/" prefix which isn't present in the test input.
-		name := metricType[len(metricsPrefix)+1:]
+		name := metricType[len(DefaultStackdriverConfig.MetricPrefix)+1:]
 		for _, point := range ts.Points {
 			count++
 			startTime := point.GetInterval().GetStartTime()
@@ -292,6 +294,44 @@ func TestSampleDeliveryTimeout(t *testing.T) {
 	for _, s := range samples {
 		m.Append(samplesToMetricFamily(s))
 	}
+	c.waitForExpectedSamples(t)
+}
+
+func TestDeliveryWithMetricPrefix(t *testing.T) {
+	// Let's create an even number of send batches so we don't run into the
+	// batch timeout case.
+	n := 100
+
+	samples := make([]sample, 0, n)
+	for i := 0; i < n; i++ {
+		name := fmt.Sprintf("test_metric_%d", i)
+		samples = append(samples, sample{
+			Name: name,
+			Labels: map[string]string{
+				model.InstanceLabel: strconv.Itoa(i),
+			},
+			Value:          float64(i),
+			ResetTimestamp: 1234567890000,
+			Timestamp:      2234567890000,
+		})
+	}
+
+	c := NewTestStorageClient(t)
+	c.prefixLen = 4
+	c.expectSamples(samples)
+
+	cfg := config.DefaultQueueConfig
+	cfg.Capacity = n
+	cfg.MaxSamplesPerSend = n
+	m := NewQueueManager(nil, cfg, nil, nil, c, &StackdriverConfig{false, "abc/"})
+
+	// These should be received by the client.
+	for _, s := range samples {
+		m.Append(samplesToMetricFamily(s))
+	}
+	m.Start()
+	defer m.Stop()
+
 	c.waitForExpectedSamples(t)
 }
 

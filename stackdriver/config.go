@@ -18,10 +18,14 @@ package stackdriver
 type StackdriverConfig struct {
 	// Whether to export Stackdriver k8s_* resource types or gke_container. The former require joining an early-access program.
 	K8sResourceTypes bool
+
+	// Prefix for all metrics.
+	MetricPrefix string
 }
 
 var (
 	DefaultStackdriverConfig = StackdriverConfig{
 		K8sResourceTypes: false,
+		MetricPrefix:     "external.googleapis.com/prometheus",
 	}
 )

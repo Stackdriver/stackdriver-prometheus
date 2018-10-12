@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"sync"
 
+	md "cloud.google.com/go/compute/metadata"
 	"github.com/Stackdriver/stackdriver-prometheus/retrieval"
 	"github.com/go-kit/kit/log"
 	config_util "github.com/prometheus/common/config"
@@ -72,7 +73,30 @@ func (s *Storage) Close() error {
 // ApplyConfig updates the state as the new config requires.
 func (s *Storage) ApplyConfig(conf *config.Config) error {
 	var projectId string
-	if value, ok := conf.GlobalConfig.ExternalLabels[ProjectIdLabel]; !ok {
+	var location string
+	var clusterName string
+	el := conf.GlobalConfig.ExternalLabels
+	if md.OnGCE() {
+		if id, err := md.ProjectID(); err == nil {
+			projectId = "projects/" + id
+			if v, ok := el[ProjectIdLabel]; !ok || v == "" {
+				el[ProjectIdLabel] = model.LabelValue(id)
+			}
+		}
+		if l, err := md.InstanceAttributeValue("cluster-location"); err == nil {
+			location = l
+			if v, ok := el[LocationLabel]; !ok || v == "" {
+				el[LocationLabel] = model.LabelValue(l)
+			}
+		}
+		if cn, err := md.InstanceAttributeValue("cluster-name"); err == nil {
+			clusterName = cn
+			if v, ok := el[ClusterNameLabel]; !ok || v == "" {
+				el[ClusterNameLabel] = model.LabelValue(cn)
+			}
+		}
+	}
+	if value, ok := el[ProjectIdLabel]; !ok {
 		return fmt.Errorf(
 			"the Stackdriver remote writer requires an external label '%s' in its configuration, and it must contain a project id or number",
 			ProjectIdLabel)
@@ -92,14 +116,16 @@ func (s *Storage) ApplyConfig(conf *config.Config) error {
 		newQueues = append(newQueues, NewQueueManager(
 			s.logger,
 			rwConf.QueueConfig,
-			conf.GlobalConfig.ExternalLabels,
+			el,
 			rwConf.WriteRelabelConfigs,
 			&clientFactory{
-				logger:    s.logger,
-				projectId: projectId,
-				url:       rwConf.URL,
-				timeout:   rwConf.RemoteTimeout,
-				index:     i,
+				logger:      s.logger,
+				projectId:   projectId,
+				location:    location,
+				clusterName: clusterName,
+				url:         rwConf.URL,
+				timeout:     rwConf.RemoteTimeout,
+				index:       i,
 			},
 			s.cfg,
 		))
@@ -118,19 +144,23 @@ func (s *Storage) ApplyConfig(conf *config.Config) error {
 }
 
 type clientFactory struct {
-	logger    log.Logger
-	projectId string
-	url       *config_util.URL
-	timeout   model.Duration
-	index     int
+	logger      log.Logger
+	projectId   string
+	location    string
+	clusterName string
+	url         *config_util.URL
+	timeout     model.Duration
+	index       int
 }
 
 func (f *clientFactory) New() StorageClient {
 	return NewClient(f.index, &ClientConfig{
-		Logger:    f.logger,
-		ProjectId: f.projectId,
-		URL:       f.url,
-		Timeout:   f.timeout,
+		Logger:      f.logger,
+		ProjectId:   f.projectId,
+		ClusterName: f.clusterName,
+		Location:    f.location,
+		URL:         f.url,
+		Timeout:     f.timeout,
 	})
 }
 

@@ -155,6 +155,7 @@ type QueueManager struct {
 	queueName        string
 	logLimiter       *rate.Limiter
 	resourceMappings []ResourceMap
+	metricPrefix     string
 
 	shardsMtx   sync.RWMutex
 	shards      *shardCollection
@@ -188,6 +189,7 @@ func NewQueueManager(logger log.Logger, cfg config.QueueConfig, externalLabelSet
 		clientFactory:    clientFactory,
 		queueName:        clientFactory.Name(),
 		resourceMappings: resourceMappings,
+		metricPrefix:     sdCfg.MetricPrefix,
 
 		logLimiter:  rate.NewLimiter(logRateLimit, logBurst),
 		numShards:   1,
@@ -421,7 +423,7 @@ func (t *QueueManager) newShardCollection(numShards int) *shardCollection {
 	}
 	s := &shardCollection{
 		qm:         t,
-		translator: NewTranslator(t.logger, metricsPrefix, t.resourceMappings),
+		translator: NewTranslator(t.logger, t.metricPrefix, t.resourceMappings),
 		shards:     shards,
 		done:       make(chan struct{}),
 	}
