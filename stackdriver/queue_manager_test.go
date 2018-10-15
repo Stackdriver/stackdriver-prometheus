@@ -141,7 +141,7 @@ func (c *TestStorageClient) Store(req *monitoring.CreateTimeSeriesRequest) error
 		seenTimeSeries[fp] = struct{}{}
 		metricType := ts.Metric.Type
 		// Remove the Stackdriver "domain/" prefix which isn't present in the test input.
-		name := metricType[len(DefaultStackdriverConfig.MetricPrefix)+1:]
+		name := metricType[c.prefixLen+1:]
 		for _, point := range ts.Points {
 			count++
 			startTime := point.GetInterval().GetStartTime()
@@ -317,13 +317,14 @@ func TestDeliveryWithMetricPrefix(t *testing.T) {
 	}
 
 	c := NewTestStorageClient(t)
-	c.prefixLen = 4
+	prefix := "abc/"
+	c.prefixLen = len(prefix)
 	c.expectSamples(samples)
 
 	cfg := config.DefaultQueueConfig
 	cfg.Capacity = n
 	cfg.MaxSamplesPerSend = n
-	m := NewQueueManager(nil, cfg, nil, nil, c, &StackdriverConfig{false, "abc/"})
+	m := NewQueueManager(nil, cfg, nil, nil, c, &StackdriverConfig{false, prefix})
 
 	// These should be received by the client.
 	for _, s := range samples {
