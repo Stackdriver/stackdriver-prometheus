@@ -77,21 +77,18 @@ func (s *Storage) ApplyConfig(conf *config.Config) error {
 	var clusterName string
 	el := conf.GlobalConfig.ExternalLabels
 	if md.OnGCE() {
-		if id, err := md.ProjectID(); err == nil {
-			projectId = "projects/" + id
-			if v, ok := el[ProjectIdLabel]; !ok || v == "" {
+		if el[ProjectIdLabel] == "" {
+			if id, err := md.ProjectID(); err == nil {
 				el[ProjectIdLabel] = model.LabelValue(id)
 			}
 		}
-		if l, err := md.InstanceAttributeValue("cluster-location"); err == nil {
-			location = l
-			if v, ok := el[LocationLabel]; !ok || v == "" {
+		if el[LocationLabel] == "" {
+			if l, err := md.InstanceAttributeValue("cluster-location"); err == nil {
 				el[LocationLabel] = model.LabelValue(l)
 			}
 		}
-		if cn, err := md.InstanceAttributeValue("cluster-name"); err == nil {
-			clusterName = cn
-			if v, ok := el[ClusterNameLabel]; !ok || v == "" {
+		if el[ClusterNameLabel] == "" {
+			if cn, err := md.InstanceAttributeValue("cluster-name"); err == nil {
 				el[ClusterNameLabel] = model.LabelValue(cn)
 			}
 		}
