@@ -73,8 +73,6 @@ func (s *Storage) Close() error {
 // ApplyConfig updates the state as the new config requires.
 func (s *Storage) ApplyConfig(conf *config.Config) error {
 	var projectId string
-	var location string
-	var clusterName string
 	el := conf.GlobalConfig.ExternalLabels
 	if md.OnGCE() {
 		if el[ProjectIdLabel] == "" {
@@ -118,8 +116,8 @@ func (s *Storage) ApplyConfig(conf *config.Config) error {
 			&clientFactory{
 				logger:      s.logger,
 				projectId:   projectId,
-				location:    location,
-				clusterName: clusterName,
+				location:    string(el[LocationLabel]),
+				clusterName: string(el[ClusterNameLabel]),
 				url:         rwConf.URL,
 				timeout:     rwConf.RemoteTimeout,
 				index:       i,
