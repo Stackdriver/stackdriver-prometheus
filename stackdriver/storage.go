@@ -17,6 +17,7 @@ package stackdriver
 
 import (
 	"fmt"
+	"strings"
 	"sync"
 
 	md "cloud.google.com/go/compute/metadata"
@@ -77,16 +78,19 @@ func (s *Storage) ApplyConfig(conf *config.Config) error {
 	if md.OnGCE() {
 		if el[ProjectIdLabel] == "" {
 			if id, err := md.ProjectID(); err == nil {
+				strings.TrimSpace(id)
 				el[ProjectIdLabel] = model.LabelValue(id)
 			}
 		}
 		if el[LocationLabel] == "" {
 			if l, err := md.InstanceAttributeValue("cluster-location"); err == nil {
+				strings.TrimSpace(l)
 				el[LocationLabel] = model.LabelValue(l)
 			}
 		}
 		if el[ClusterNameLabel] == "" {
 			if cn, err := md.InstanceAttributeValue("cluster-name"); err == nil {
+				strings.TrimSpace(cn)
 				el[ClusterNameLabel] = model.LabelValue(cn)
 			}
 		}
