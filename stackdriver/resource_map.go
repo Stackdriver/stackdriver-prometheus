@@ -22,7 +22,9 @@ import (
 )
 
 const (
-	ProjectIdLabel = "_stackdriver_project_id"
+	ProjectIdLabel   = "_stackdriver_project_id"
+	LocationLabel    = "_kubernetes_location"
+	ClusterNameLabel = "_kubernetes_cluster_name"
 )
 
 // TODO(jkohen): ensure these are sorted from more specific to less specific.
@@ -32,8 +34,8 @@ var DefaultResourceMappings = []ResourceMap{
 		Type: "gke_container",
 		LabelMap: map[string]string{
 			ProjectIdLabel:                   "project_id",
-			"_kubernetes_location":           "zone",
-			"_kubernetes_cluster_name":       "cluster_name",
+			LocationLabel:                    "zone",
+			ClusterNameLabel:                 "cluster_name",
 			"_kubernetes_namespace":          "namespace_id",
 			"_kubernetes_pod_name":           "pod_id",
 			"_kubernetes_pod_node_name":      "instance_id",
@@ -48,8 +50,8 @@ var K8sResourceMappings = []ResourceMap{
 		Type: "k8s_container",
 		LabelMap: map[string]string{
 			ProjectIdLabel:                         "project_id",
-			"_kubernetes_location":                 "location",
-			"_kubernetes_cluster_name":             "cluster_name",
+			LocationLabel:                          "location",
+			ClusterNameLabel:                       "cluster_name",
 			"__meta_kubernetes_namespace":          "namespace_name",
 			"__meta_kubernetes_pod_name":           "pod_name",
 			"__meta_kubernetes_pod_container_name": "container_name",
@@ -59,8 +61,8 @@ var K8sResourceMappings = []ResourceMap{
 		Type: "k8s_pod",
 		LabelMap: map[string]string{
 			ProjectIdLabel:                "project_id",
-			"_kubernetes_location":        "location",
-			"_kubernetes_cluster_name":    "cluster_name",
+			LocationLabel:                 "location",
+			ClusterNameLabel:              "cluster_name",
 			"__meta_kubernetes_namespace": "namespace_name",
 			"__meta_kubernetes_pod_name":  "pod_name",
 		},
@@ -69,9 +71,17 @@ var K8sResourceMappings = []ResourceMap{
 		Type: "k8s_node",
 		LabelMap: map[string]string{
 			ProjectIdLabel:                "project_id",
-			"_kubernetes_location":        "location",
-			"_kubernetes_cluster_name":    "cluster_name",
+			LocationLabel:                 "location",
+			ClusterNameLabel:              "cluster_name",
 			"__meta_kubernetes_node_name": "node_name",
+		},
+	},
+	{
+		Type: "k8s_cluster",
+		LabelMap: map[string]string{
+			ProjectIdLabel:   "project_id",
+			LocationLabel:    "location",
+			ClusterNameLabel: "cluster_name",
 		},
 	},
 }

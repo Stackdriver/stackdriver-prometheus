@@ -38,7 +38,6 @@ import (
 )
 
 const (
-	metricsPrefix             = "external.googleapis.com/prometheus"
 	maxTimeseriesesPerRequest = 200
 	MonitoringWriteScope      = "https://www.googleapis.com/auth/monitoring.write"
 )
@@ -47,21 +46,25 @@ const (
 // implementation may hit a single backend, so the application should create a
 // number of these clients.
 type Client struct {
-	index     int // Used to differentiate clients in metrics.
-	logger    log.Logger
-	projectId string
-	url       *config_util.URL
-	timeout   time.Duration
+	index       int // Used to differentiate clients in metrics.
+	logger      log.Logger
+	projectId   string
+	clusterName string
+	location    string
+	url         *config_util.URL
+	timeout     time.Duration
 
 	conn *grpc.ClientConn
 }
 
 // ClientConfig configures a Client.
 type ClientConfig struct {
-	Logger    log.Logger
-	ProjectId string // The Stackdriver project id in "projects/name-or-number" format.
-	URL       *config_util.URL
-	Timeout   model.Duration
+	Logger      log.Logger
+	ProjectId   string // The Stackdriver project id in "projects/name-or-number" format.
+	ClusterName string
+	Location    string
+	URL         *config_util.URL
+	Timeout     model.Duration
 }
 
 // NewClient creates a new Client.
@@ -71,11 +74,13 @@ func NewClient(index int, conf *ClientConfig) *Client {
 		logger = log.NewNopLogger()
 	}
 	return &Client{
-		index:     index,
-		logger:    logger,
-		projectId: conf.ProjectId,
-		url:       conf.URL,
-		timeout:   time.Duration(conf.Timeout),
+		index:       index,
+		logger:      logger,
+		projectId:   conf.ProjectId,
+		clusterName: conf.ClusterName,
+		location:    conf.Location,
+		url:         conf.URL,
+		timeout:     time.Duration(conf.Timeout),
 	}
 }
 
