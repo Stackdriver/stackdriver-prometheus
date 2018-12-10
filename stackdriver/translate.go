@@ -212,7 +212,7 @@ func (t *Translator) translateSummary(name string,
 	baseMetricType := getMetricType(t.metricsPrefix, name)
 	summary := metric.GetSummary()
 	tss := make([]*monitoring_pb.TimeSeries, 2+len(summary.GetQuantile()))
-	// Sum metric. Summary works over a sliding window, so this value could go down, hence GAUGE.
+	// Sum metric. This is a GAUGE because the sum can decrease if the metric tracks negative values.
 	tss[0] = &monitoring_pb.TimeSeries{
 		Metric: &metric_pb.Metric{
 			Labels: tsLabels,
@@ -230,7 +230,8 @@ func (t *Translator) translateSummary(name string,
 			},
 		},
 	}
-	// Count metric. Summary works over a sliding window, so this value could go down, hence GAUGE.
+	// Count metric. While summary works over a sliding window, this value is monotonically increasing:
+	// https://prometheus.io/docs/practices/histograms/#count-and-sum-of-observations
 	tss[1] = &monitoring_pb.TimeSeries{
 		Metric: &metric_pb.Metric{
 			Labels: tsLabels,
