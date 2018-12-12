@@ -1,4 +1,10 @@
-# Stackdriver Prometheus server
+# Stackdriver Prometheus server has been superseded by [stackdriver-prometheus-sidecar](https://github.com/Stackdriver/stackdriver-prometheus-sidecar)
+
+The new integration makes it easier than ever to send metrics to Stackdriver from an existing Prometheus deployment.
+
+For other ways to ingest your metrics into Stackdriver, see [Using custom metrics](https://cloud.google.com/monitoring/custom-metrics/) and [Monitoring agent overview](https://cloud.google.com/monitoring/agent/).
+
+## Overview
 
 This repository contains a variant of the Prometheus server that can send
 metrics to Stackdriver. This software can support most Prometheus deployments
